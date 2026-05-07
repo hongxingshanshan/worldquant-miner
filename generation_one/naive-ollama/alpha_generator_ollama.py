@@ -527,7 +527,7 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
         completed = []
         retry_queue = []
         successful = 0
-        max_check_attempts = 30  # 单个模拟最多检查 30 次（约 5 分钟）
+        max_check_attempts = 90  # 单个模拟最多检查 90 次（约 15 分钟，每次间隔 10 秒）
 
         for sim_id, info in self.pending_results.items():
             if info["status"] == "pending":
