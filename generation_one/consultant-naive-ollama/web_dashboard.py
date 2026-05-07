@@ -8,6 +8,10 @@ from datetime import datetime, timedelta
 import requests
 import logging
 from typing import Dict, List, Optional
+import sys
+import ctypes
+import signal
+import atexit
 
 app = Flask(__name__)
 
@@ -452,13 +456,46 @@ def api_refresh():
     """API endpoint to refresh status."""
     return jsonify(dashboard.get_system_status())
 
+def setup_cleanup_handler():
+    """设置 Windows 控制台关闭事件处理器"""
+    def cleanup():
+        logger.info("Web Dashboard 正在关闭...")
+
+    def signal_handler(signum=None, frame=None):
+        logger.info("收到退出信号，正在关闭...")
+        cleanup()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    if sys.platform == 'win32':
+        try:
+            CTRL_HANDLER_TYPE = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
+
+            def console_ctrl_handler(ctrl_type):
+                if ctrl_type in (2, 5, 6):
+                    logger.info(f"收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在关闭...")
+                    cleanup()
+                    return True
+                return False
+
+            handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+            logger.info("已注册 Windows 控制台关闭事件处理器")
+        except Exception as e:
+            logger.warning(f"无法注册 Windows 控制台事件处理器: {e}")
+
+    atexit.register(cleanup)
+
 if __name__ == '__main__':
-    # Create templates directory if it doesn't exist
+    setup_cleanup_handler()
+
     os.makedirs('templates', exist_ok=True)
-    
+
     print("Starting Alpha Generator Dashboard...")
     print("Dashboard will be available at: http://localhost:5000")
     print("Ollama WebUI: http://localhost:3000")
     print("Ollama API: http://localhost:11434")
-    
+
     app.run(host='0.0.0.0', port=5000, debug=True)

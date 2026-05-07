@@ -14,6 +14,10 @@ from flask import Flask, render_template_string, jsonify, request
 from flask_cors import CORS
 import psutil
 import GPUtil
+import sys
+import ctypes
+import signal
+import atexit
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -380,14 +384,14 @@ def get_ollama_status():
         import requests
         response = requests.get('http://localhost:11434/api/tags', timeout=5)
         return response.status_code == 200
-                    except:
+    except:
         return False
 
 def get_orchestrator_status():
     """Check if alpha orchestrator is running."""
     try:
         return os.path.exists('orchestrator_state.json')
-                        except:
+    except:
         return False
 
 def get_mining_stats():
@@ -404,9 +408,9 @@ def get_mining_stats():
                     'current_cycle': state.get('current_cycle', 0),
                     'total_cycles': state.get('total_cycles', 0)
                 }
-        except Exception as e:
+    except Exception as e:
         pass
-    
+
     return {
         'total_adaptive_alphas': 0,
         'total_generator_alphas': 0,
@@ -431,10 +435,10 @@ def get_ollama_info():
                 'available_models': models,
                 'last_update': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-        except Exception as e:
+    except Exception as e:
         pass
-            
-            return {
+
+    return {
         'current_model': 'Unknown',
         'model_loaded': False,
         'available_models': [],
@@ -508,14 +512,49 @@ def main():
     parser.add_argument('--port', type=int, default=8080, help='Port to run the dashboard on')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Host to bind to')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
-    
+
     args = parser.parse_args()
-    
+
     print(f"🚀 Starting Integrated Alpha Mining System Dashboard")
     print(f"📊 Dashboard will be available at: http://{args.host}:{args.port}")
     print(f"🔧 Debug mode: {'Enabled' if args.debug else 'Disabled'}")
-    
+
     app.run(host=args.host, port=args.port, debug=args.debug)
 
+
+def setup_cleanup_handler():
+    """设置 Windows 控制台关闭事件处理器"""
+    def cleanup():
+        logger.info("Web Dashboard 正在关闭...")
+
+    def signal_handler(signum=None, frame=None):
+        logger.info("收到退出信号，正在关闭...")
+        cleanup()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    if sys.platform == 'win32':
+        try:
+            CTRL_HANDLER_TYPE = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
+
+            def console_ctrl_handler(ctrl_type):
+                if ctrl_type in (2, 5, 6):
+                    logger.info(f"收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在关闭...")
+                    cleanup()
+                    return True
+                return False
+
+            handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+            logger.info("已注册 Windows 控制台关闭事件处理器")
+        except Exception as e:
+            logger.warning(f"无法注册 Windows 控制台事件处理器: {e}")
+
+    atexit.register(cleanup)
+
+
 if __name__ == '__main__':
+    setup_cleanup_handler()
     main()

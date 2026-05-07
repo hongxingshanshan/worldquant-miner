@@ -16,6 +16,7 @@ import queue
 from dataclasses import dataclass
 import signal
 import atexit
+import ctypes
 
 # Configure logging
 logging.basicConfig(
@@ -300,6 +301,28 @@ class AlphaOrchestrator:
         # 注册信号处理
         signal.signal(signal.SIGINT, cleanup_handler)
         signal.signal(signal.SIGTERM, cleanup_handler)
+
+        # Windows 平台特殊处理：捕获控制台关闭事件
+        if sys.platform == 'win32':
+            try:
+                # 定义控制台事件类型
+                CTRL_HANDLER_TYPE = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
+
+                def console_ctrl_handler(ctrl_type):
+                    """处理 Windows 控制台事件"""
+                    # CTRL_CLOSE_EVENT = 2, CTRL_LOGOFF_EVENT = 5, CTRL_SHUTDOWN_EVENT = 6
+                    if ctrl_type in (2, 5, 6):
+                        logger.info(f"收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在清理子进程...")
+                        self.cleanup_child_processes()
+                        return True
+                    return False
+
+                # 设置控制台处理器
+                handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
+                ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+                logger.info("已注册 Windows 控制台关闭事件处理器")
+            except Exception as e:
+                logger.warning(f"无法注册 Windows 控制台事件处理器: {e}")
 
         # 注册 atexit 处理器（用于正常退出）
         atexit.register(self.cleanup_child_processes)

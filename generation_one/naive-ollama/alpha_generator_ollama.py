@@ -12,6 +12,10 @@ from queue import Queue
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
+import sys
+import ctypes
+import signal
+import atexit
 
 # 尝试导入配置管理器
 try:
@@ -886,7 +890,10 @@ def main():
         generator = AlphaGenerator(args.credentials, args.ollama_url, args.max_concurrent, args.config)
         generator.model_name = model_name  # Set the model name
         generator.initial_model = model_name  # Set the initial model for reset
-        
+
+        # 设置清理处理器
+        setup_cleanup_handler(generator)
+
         # Get data fields and operators once
         print("Fetching data fields and operators...")
         data_fields = generator.get_data_fields()
@@ -942,10 +949,53 @@ def main():
         logging.info(f"Total batches processed: {batch_number - 1}")
         logging.info(f"Total successful alphas: {total_successful}")
         return 0
-        
+
     except Exception as e:
         logging.error(f"Fatal error: {str(e)}")
         return 1
 
+
+def setup_cleanup_handler(generator):
+    """设置 Windows 控制台关闭事件处理器"""
+    def cleanup():
+        logging.info("Alpha Generator 正在关闭...")
+        if generator:
+            try:
+                # 关闭线程池
+                generator.executor.shutdown(wait=False)
+                logging.info("线程池已关闭")
+            except Exception as e:
+                logging.error(f"关闭线程池时出错: {e}")
+
+    def signal_handler(signum=None, frame=None):
+        logging.info("收到退出信号，正在关闭...")
+        cleanup()
+        sys.exit(0)
+
+    # 注册信号处理
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Windows 平台特殊处理
+    if sys.platform == 'win32':
+        try:
+            CTRL_HANDLER_TYPE = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
+
+            def console_ctrl_handler(ctrl_type):
+                if ctrl_type in (2, 5, 6):
+                    logging.info(f"收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在关闭...")
+                    cleanup()
+                    return True
+                return False
+
+            handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+            logging.info("已注册 Windows 控制台关闭事件处理器")
+        except Exception as e:
+            logging.warning(f"无法注册 Windows 控制台事件处理器: {e}")
+
+    atexit.register(cleanup)
+
+
 if __name__ == "__main__":
-    exit(main())
+    main()

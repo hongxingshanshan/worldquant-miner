@@ -85,6 +85,9 @@ if not exist credential.txt (
     exit /b 1
 )
 echo [Starting] Using default model from config file...
+echo [Starting] Web Dashboard will be available at http://localhost:5000
+start "Web Dashboard - naive-ollama" python web_dashboard.py
+timeout /t 2 /nobreak >nul
 python alpha_orchestrator.py --credentials ./credential.txt --mode continuous --config config.json
 goto end
 
@@ -102,6 +105,9 @@ if not exist credential.txt (
     exit /b 1
 )
 echo [Starting] Using default model from config file...
+echo [Starting] Web Dashboard will be available at http://localhost:5000
+start "Web Dashboard - consultant-naive" python web_dashboard.py
+timeout /t 2 /nobreak >nul
 python alpha_orchestrator.py --credentials ./credential.txt --mode continuous --mining-interval 6 --batch-size 3 --max-concurrent 2 --config config.json
 goto end
 
@@ -119,6 +125,9 @@ if not exist credential.txt (
     exit /b 1
 )
 echo [Starting] Using default model from config file...
+echo [Starting] Web Dashboard will be available at http://localhost:5000
+start "Web Dashboard - multi-arm-bandit" python web_dashboard.py
+timeout /t 2 /nobreak >nul
 python alpha_orchestrator.py --credentials ./credential.txt --mode continuous --mining-interval 6 --batch-size 3 --max-concurrent 2 --config config.json
 goto end
 
