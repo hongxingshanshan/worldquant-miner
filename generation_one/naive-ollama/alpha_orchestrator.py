@@ -378,8 +378,6 @@ class AlphaOrchestrator:
                     logger.warning("注册 Windows 控制台事件处理器失败")
             except Exception as e:
                 logger.warning(f"无法注册 Windows 控制台事件处理器: {e}")
-            except Exception as e:
-                logger.warning(f"无法注册 Windows 控制台事件处理器: {e}")
 
         # 注册 atexit 处理器（用于正常退出）
         atexit.register(self.cleanup_child_processes)
