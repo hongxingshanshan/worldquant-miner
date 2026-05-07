@@ -626,9 +626,17 @@ Generate 100 expressions:"""
         completed = []
         retry_queue = []
         successful = 0
-        
+        max_check_attempts = 90  # 单个模拟最多检查 90 次（约 15 分钟，每次间隔 10 秒）
+
         for sim_id, info in self.pending_results.items():
             if info["status"] == "pending":
+                # 检查次数限制
+                info["attempts"] = info.get("attempts", 0) + 1
+                if info["attempts"] > max_check_attempts:
+                    logging.warning(f"Simulation {sim_id} exceeded max check attempts ({max_check_attempts}), marking as failed")
+                    completed.append(sim_id)
+                    continue
+
                 # Check if simulation has been pending too long (30 minutes)
                 if "start_time" not in info:
                     info["start_time"] = time.time()
@@ -638,7 +646,7 @@ Generate 100 expressions:"""
                     continue
                 try:
                     sim_progress_resp = self.sess.get(info["progress_url"])
-                    logging.info(f"Checking simulation {sim_id} for alpha: {info['alpha'][:50]}...")
+                    logging.info(f"Checking simulation {sim_id} (attempt {info['attempts']}/{max_check_attempts}) for alpha: {info['alpha'][:50]}...")
                     
                     # Handle rate limits
                     if sim_progress_resp.status_code == 429:
