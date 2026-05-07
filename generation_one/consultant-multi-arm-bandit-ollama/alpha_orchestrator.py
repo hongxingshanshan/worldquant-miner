@@ -14,6 +14,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 from dataclasses import dataclass
+import signal
+import atexit
 
 # Configure logging
 logging.basicConfig(
@@ -44,13 +46,10 @@ class ModelFleetManager:
         self.max_vram_errors = 3  # Number of VRAM errors before downgrading
         
         # Model fleet ordered by priority (largest to smallest)
-        # Optimized for RTX A4000 (16GB VRAM) with DeepSeek-R1 reasoning models
+        # Using available models on this system
         self.model_fleet = [
-            ModelInfo("deepseek-r1:8b", 5200, 1, "DeepSeek-R1 8B - Reasoning model (RTX A4000 optimized)"),
-            ModelInfo("deepseek-r1:7b", 4700, 2, "DeepSeek-R1 7B - Reasoning model"),
-            ModelInfo("deepseek-r1:1.5b", 1100, 3, "DeepSeek-R1 1.5B - Reasoning model"),
-            ModelInfo("llama3:3b", 2048, 4, "Llama 3.2 3B - Fallback model"),
-            ModelInfo("phi3:mini", 2200, 5, "Phi3 mini - Emergency fallback"),
+            ModelInfo("llama3:8b", 4661, 1, "Llama 3 8B - Primary model"),
+            ModelInfo("qwen2.5-coder:1.5b", 986, 2, "Qwen 2.5 Coder 1.5B - Fallback model"),
         ]
         
         # State file to persist current model selection
@@ -155,28 +154,90 @@ class ModelFleetManager:
     
 class AlphaOrchestrator:
     """Enhanced alpha orchestrator that manages the integrated alpha miner."""
-    
+
     def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434"):
         self.credentials_path = credentials_path
         self.ollama_url = ollama_url
-        
+
         # Model fleet management
         self.model_fleet_manager = ModelFleetManager(ollama_url)
-        
+
         # Process management
         self.integrated_miner_process = None
         self.vram_monitor_process = None
         self.restart_thread = None
         self.running = True
-        
+        self._child_processes = []  # 跟踪所有子进程
+
         # Configuration
         self.max_concurrent_simulations = 3
         self.restart_interval = 30 * 60  # 30 minutes
         self.last_restart_time = time.time()
         self.last_submission_date = ""
-        
+
         # Load submission history
         self.load_submission_history()
+
+        # 注册退出清理函数
+        self._setup_cleanup_handlers()
+
+    def _setup_cleanup_handlers(self):
+        """设置退出时的清理处理器"""
+        def cleanup_handler(signum=None, frame=None):
+            logger.info("收到退出信号，正在清理子进程...")
+            self.cleanup_child_processes()
+            sys.exit(0)
+
+        # 注册信号处理
+        signal.signal(signal.SIGINT, cleanup_handler)
+        signal.signal(signal.SIGTERM, cleanup_handler)
+
+        # 注册 atexit 处理器（用于正常退出）
+        atexit.register(self.cleanup_child_processes)
+
+    def cleanup_child_processes(self):
+        """清理所有子进程"""
+        self.running = False
+
+        # 终止 integrated_miner_process
+        if self.integrated_miner_process and self.integrated_miner_process.poll() is None:
+            logger.info(f"正在终止 integrated_miner_process (PID: {self.integrated_miner_process.pid})")
+            try:
+                self.integrated_miner_process.terminate()
+                self.integrated_miner_process.wait(timeout=5)
+            except:
+                try:
+                    self.integrated_miner_process.kill()
+                except:
+                    pass
+
+        # 终止 vram_monitor_process
+        if self.vram_monitor_process and self.vram_monitor_process.poll() is None:
+            logger.info(f"正在终止 vram_monitor_process (PID: {self.vram_monitor_process.pid})")
+            try:
+                self.vram_monitor_process.terminate()
+                self.vram_monitor_process.wait(timeout=5)
+            except:
+                try:
+                    self.vram_monitor_process.kill()
+                except:
+                    pass
+
+        # 终止所有跟踪的子进程
+        for proc in self._child_processes:
+            if proc.poll() is None:
+                logger.info(f"正在终止子进程 (PID: {proc.pid})")
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                except:
+                    try:
+                        proc.kill()
+                    except:
+                        pass
+
+        self._child_processes.clear()
+        logger.info("所有子进程已清理")
 
     def load_submission_history(self):
         """Load submission history from file."""
@@ -562,8 +623,8 @@ def main():
                       help='Maximum concurrent simulations (default: 3)')
     parser.add_argument('--restart-interval', type=int, default=30,
                       help='Restart interval in minutes (default: 30)')
-    parser.add_argument('--ollama-model', type=str, default='deepseek-r1:8b',
-                      help='Ollama model to use (default: deepseek-r1:8b)')
+    parser.add_argument('--ollama-model', type=str, default='llama3:8b',
+                      help='Ollama model to use (default: llama3:8b)')
     
     # Integrated miner specific parameters
     parser.add_argument('--adaptive-batch-size', type=int, default=5,

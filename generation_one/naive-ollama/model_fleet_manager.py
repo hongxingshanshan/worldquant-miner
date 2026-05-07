@@ -12,6 +12,13 @@ import os
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
+# 尝试导入配置管理器
+try:
+    from config_manager import get_config_manager, ConfigManager
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -31,26 +38,67 @@ class ModelInfo:
     priority: int  # Lower number = higher priority (used first)
     description: str
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ModelInfo':
+        """从字典创建"""
+        return cls(
+            name=data.get('name', ''),
+            size_mb=data.get('size_mb', 0),
+            priority=data.get('priority', 99),
+            description=data.get('description', '')
+        )
+
 class ModelFleetManager:
     """Manages a fleet of models with automatic downgrading on VRAM issues."""
-    
-    def __init__(self, container_name: str = "naive-ollma-gpu"):
+
+    DEFAULT_MODEL_FLEET = [
+        {"name": "llama3:8b", "size_mb": 4661, "priority": 1, "description": "Llama 3 8B - Primary model"},
+        {"name": "qwen2.5-coder:1.5b", "size_mb": 986, "priority": 2, "description": "Qwen 2.5 Coder 1.5B - Fallback model"},
+    ]
+
+    def __init__(self, container_name: str = "naive-ollma-gpu", config_path: Optional[str] = None):
         self.container_name = container_name
         self.current_model_index = 0
         self.vram_error_count = 0
         self.max_vram_errors = 3  # Number of VRAM errors before downgrading
-        
-        # Model fleet ordered by priority (largest to smallest)
-        self.model_fleet = [
-            ModelInfo("llama3.2:3b", 2048, 1, "Large model - 3B parameters"),
-            ModelInfo("phi3:mini", 2200, 2, "Medium model - Phi3 mini"),
-            ModelInfo("tinyllama:1.1b", 637, 3, "Small model - 1.1B parameters"),
-            ModelInfo("qwen2.5:0.5b", 397, 4, "Tiny model - 0.5B parameters"),
-        ]
-        
+        self.config_path = config_path or "config.json"
+
+        # 加载模型舰队配置
+        self.model_fleet = self._load_model_fleet()
+
         # State file to persist current model selection
         self.state_file = "model_fleet_state.json"
         self.load_state()
+
+    def _load_model_fleet(self) -> List[ModelInfo]:
+        """从配置文件或使用默认值加载模型舰队"""
+        # 尝试从配置管理器加载
+        if CONFIG_AVAILABLE:
+            try:
+                config_manager = get_config_manager(self.config_path)
+                return [ModelInfo.from_dict({
+                    "name": m.name,
+                    "size_mb": m.size_mb,
+                    "priority": m.priority,
+                    "description": m.description
+                }) for m in config_manager.config.model_fleet]
+            except Exception as e:
+                logger.warning(f"从配置管理器加载失败: {e}")
+
+        # 尝试直接读取配置文件
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    fleet_data = data.get('model_fleet', [])
+                    if fleet_data:
+                        return [ModelInfo.from_dict(m) for m in fleet_data]
+            except Exception as e:
+                logger.warning(f"读取配置文件失败: {e}")
+
+        # 使用默认值
+        logger.info("使用默认模型舰队配置")
+        return [ModelInfo.from_dict(m) for m in self.DEFAULT_MODEL_FLEET]
         
     def load_state(self):
         """Load the current model state from file."""
@@ -211,22 +259,31 @@ class ModelFleetManager:
         """Update the alpha generator configuration to use the new model."""
         try:
             # Update the default model in alpha_generator_ollama.py
-            with open('alpha_generator_ollama.py', 'r') as f:
+            with open('alpha_generator_ollama.py', 'r', encoding='utf-8') as f:
                 content = f.read()
-            
+
+            # 获取当前默认模型（从配置或使用默认值）
+            current_default = "llama3:8b"  # 后备默认值
+            if CONFIG_AVAILABLE:
+                try:
+                    config_manager = get_config_manager(self.config_path)
+                    current_default = config_manager.config.default_model
+                except:
+                    pass
+
             # Replace the default model
             content = content.replace(
-                "default='llama3.2:3b'",
+                f"default='{current_default}'",
                 f"default='{model_name}'"
             )
             content = content.replace(
-                "getattr(self, 'model_name', 'llama3.2:3b')",
+                f"getattr(self, 'model_name', '{current_default}')",
                 f"getattr(self, 'model_name', '{model_name}')"
             )
-            
-            with open('alpha_generator_ollama.py', 'w') as f:
+
+            with open('alpha_generator_ollama.py', 'w', encoding='utf-8') as f:
                 f.write(content)
-            
+
             logger.info(f"Updated alpha generator config to use {model_name}")
         except Exception as e:
             logger.error(f"Error updating alpha generator config: {e}")

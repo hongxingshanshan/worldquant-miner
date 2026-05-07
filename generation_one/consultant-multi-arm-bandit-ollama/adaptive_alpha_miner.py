@@ -16,6 +16,13 @@ import pickle
 from datetime import datetime, timedelta
 import math
 
+# 尝试导入配置管理器
+try:
+    from config_manager import get_config_manager, ConfigManager
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -301,12 +308,27 @@ class GeneticAlgorithm:
 
 class AdaptiveAlphaMiner:
     """Adaptive alpha miner using multi-arm bandit and genetic algorithm."""
-    
-    def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434", ollama_model: str = "deepseek-r1:8b", region: str = None):
+
+    def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434", ollama_model: str = None, region: str = None, config_path: str = "config.json"):
         self.sess = requests.Session()
         self.credentials_path = credentials_path
         self.ollama_url = ollama_url
-        self.ollama_model = ollama_model
+        self.config_path = config_path
+
+        # 从配置文件加载模型
+        if ollama_model:
+            self.ollama_model = ollama_model
+        elif CONFIG_AVAILABLE:
+            try:
+                config_manager = get_config_manager(config_path)
+                self.ollama_model = config_manager.config.default_model
+                logger.info(f"从配置文件加载模型: {self.ollama_model}")
+            except Exception as e:
+                logger.warning(f"从配置文件加载模型失败: {e}")
+                self.ollama_model = "llama3:8b"
+        else:
+            self.ollama_model = "llama3:8b"
+
         self.setup_auth(credentials_path)
         
         # Initialize components
@@ -488,19 +510,19 @@ class AdaptiveAlphaMiner:
             max_trade_options = ["ON", "OFF"]  # Enable max trade for ASI and CHN
         
         for delay in delays:
-        for neutralization in neutralizations:
-            for truncation in truncations:
+            for neutralization in neutralizations:
+                for truncation in truncations:
                     for max_trade in max_trade_options:
-                settings = SimulationSettings(
+                        settings = SimulationSettings(
                             region=region,
                             universe=universe,
-                    instrumentType="EQUITY",
+                            instrumentType="EQUITY",
                             delay=delay,
-                    neutralization=neutralization,
-                    truncation=truncation,
-                    maxTrade=max_trade
-                )
-                self.bandit.add_arm(settings)
+                            neutralization=neutralization,
+                            truncation=truncation,
+                            maxTrade=max_trade
+                        )
+                        self.bandit.add_arm(settings)
         
         logger.info(f"Initialized {len(self.bandit.arms)} settings variations for universe {universe} in region {region}")
         
@@ -678,19 +700,19 @@ JSON:"""
                             generated_expressions = []
                         
                         # Validate and add expressions
-                    field_ids = [field_id for field_id, _ in selected_fields]
+                        field_ids = [field_id for field_id, _ in selected_fields]
                         for expr in generated_expressions:
                             if isinstance(expr, str) and expr.strip():
                                 expr = expr.strip()
                                 # Validate that it contains at least one of our selected fields
                                 if any(field_id in expr for field_id in field_ids):
-                        # Additional validation - check for basic syntax
+                                    # Additional validation - check for basic syntax
                                     if '(' in expr and ')' in expr:
                                         expressions.append(expr)
                                         logger.info(f"Generated expression: {expr}")
-                        else:
+                                    else:
                                         logger.warning(f"Generated expression has invalid syntax: {expr}")
-                    else:
+                                else:
                                     logger.warning(f"Generated expression doesn't contain selected fields: {expr}")
                         
                         # If we got valid expressions, continue to next iteration
@@ -741,11 +763,11 @@ JSON:"""
                             logger.warning(f"Failed to fix JSON: {fix_error}")
                     
                     # If JSON parsing failed or no valid expressions, use fallback
-                        field_id, _ = random.choice(selected_fields)
-                        operator_name, _ = random.choice(selected_operators)
-                        fallback_expr = f"{operator_name}({field_id}, {lookback})"
-                        expressions.append(fallback_expr)
-                        logger.info(f"Using fallback expression {i+1}: {fallback_expr}")
+                    field_id, _ = random.choice(selected_fields)
+                    operator_name, _ = random.choice(selected_operators)
+                    fallback_expr = f"{operator_name}({field_id}, {lookback})"
+                    expressions.append(fallback_expr)
+                    logger.info(f"Using fallback expression {i+1}: {fallback_expr}")
                 else:
                     # Fallback if Ollama fails
                     field_id, _ = random.choice(selected_fields)
@@ -1348,8 +1370,8 @@ def main():
                       help='Path to credentials file (default: ./credential.txt)')
     parser.add_argument('--ollama-url', type=str, default='http://localhost:11434',
                       help='Ollama API URL (default: http://localhost:11434)')
-    parser.add_argument('--ollama-model', type=str, default='deepseek-r1:8b',
-                      help='Ollama model to use (default: deepseek-r1:8b)')
+    parser.add_argument('--ollama-model', type=str, default=None,
+                      help='Ollama model to use (default: from config.json or llama3:8b)')
     parser.add_argument('--mode', type=str, choices=['mine', 'submit', 'lateral', 'hopeful'],
                       default='mine', help='Operation mode (default: mine)')
     parser.add_argument('--batch-size', type=int, default=5,
@@ -1364,11 +1386,13 @@ def main():
                       help='Path to hopeful alphas file for processing (default: hopeful_alphas.json)')
     parser.add_argument('--hopeful-count', type=int, default=10,
                       help='Number of hopeful alphas to process (default: 10)')
-    
+    parser.add_argument('--config', type=str, default='config.json',
+                      help='Path to configuration file (default: config.json)')
+
     args = parser.parse_args()
-    
+
     try:
-        miner = AdaptiveAlphaMiner(args.credentials, args.ollama_url, args.ollama_model, args.region)
+        miner = AdaptiveAlphaMiner(args.credentials, args.ollama_url, args.ollama_model, args.region, args.config)
         
         if args.mode == 'mine':
             logger.info(f"Starting adaptive mining for {args.iterations} iterations")

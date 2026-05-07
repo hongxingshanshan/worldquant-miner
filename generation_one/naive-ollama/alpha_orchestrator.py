@@ -6,7 +6,7 @@ import time
 import logging
 import schedule
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 from requests.auth import HTTPBasicAuth
 import subprocess
 import sys
@@ -14,6 +14,17 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 from dataclasses import dataclass
+import signal
+import atexit
+
+# 导入配置管理器
+try:
+    from config_manager import get_config_manager, ConfigManager, Config, ModelInfo as ConfigModelInfo
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+    logger_warning = logging.getLogger(__name__)
+    logger_warning.warning("config_manager 模块未找到，使用默认配置")
 
 # Configure logging
 logging.basicConfig(
@@ -34,28 +45,59 @@ class ModelInfo:
     priority: int  # Lower number = higher priority (used first)
     description: str
 
+    @classmethod
+    def from_config(cls, config_model) -> 'ModelInfo':
+        """从配置模块的 ModelInfo 转换"""
+        return cls(
+            name=config_model.name,
+            size_mb=config_model.size_mb,
+            priority=config_model.priority,
+            description=config_model.description
+        )
+
 class ModelFleetManager:
     """Manages a fleet of models with automatic downgrading on VRAM issues."""
-    
-    def __init__(self, ollama_url: str = "http://localhost:11434"):
+
+    def __init__(self, ollama_url: str = "http://localhost:11434", config_path: Optional[str] = None, model_override: Optional[str] = None):
         self.ollama_url = ollama_url
         self.current_model_index = 0
         self.vram_error_count = 0
         self.max_vram_errors = 3  # Number of VRAM errors before downgrading
-        
-        # Model fleet ordered by priority (largest to smallest)
-        # Optimized for RTX A4000 (16GB VRAM) with DeepSeek-R1 reasoning models
-        self.model_fleet = [
-            ModelInfo("deepseek-r1:8b", 5200, 1, "DeepSeek-R1 8B - Reasoning model (RTX A4000 optimized)"),
-            ModelInfo("deepseek-r1:7b", 4700, 2, "DeepSeek-R1 7B - Reasoning model"),
-            ModelInfo("deepseek-r1:1.5b", 1100, 3, "DeepSeek-R1 1.5B - Reasoning model"),
-            ModelInfo("llama3:3b", 2048, 4, "Llama 3.2 3B - Fallback model"),
-            ModelInfo("phi3:mini", 2200, 5, "Phi3 mini - Emergency fallback"),
-        ]
-        
+        self.model_override = model_override  # 启动时指定的模型
+
+        # 加载配置
+        self.config = None
+        if CONFIG_AVAILABLE:
+            self.config_manager = get_config_manager(config_path)
+            self.config = self.config_manager.config
+            self.model_fleet = [ModelInfo.from_config(m) for m in self.config.model_fleet]
+            logger.info(f"从配置文件加载模型舰队: {[m.name for m in self.model_fleet]}")
+        else:
+            # 默认模型舰队
+            self.model_fleet = [
+                ModelInfo("llama3:8b", 4661, 1, "Llama 3 8B - Primary model"),
+                ModelInfo("qwen2.5-coder:1.5b", 986, 2, "Qwen 2.5 Coder 1.5B - Fallback model"),
+            ]
+
+        # 如果指定了模型，调整舰队顺序
+        if model_override:
+            self._reorder_fleet_for_model(model_override)
+
         # State file to persist current model selection
         self.state_file = "model_fleet_state.json"
         self.load_state()
+
+    def _reorder_fleet_for_model(self, model_name: str):
+        """将指定模型移到舰队首位"""
+        for i, model in enumerate(self.model_fleet):
+            if model.name == model_name or model.name.startswith(model_name):
+                # 将该模型移到首位
+                self.model_fleet.insert(0, self.model_fleet.pop(i))
+                logger.info(f"模型 {model.name} 已设置为首选")
+                return
+        # 如果模型不在舰队中，添加到首位
+        self.model_fleet.insert(0, ModelInfo(model_name, 0, 0, f"User specified: {model_name}"))
+        logger.info(f"添加用户指定模型到舰队首位: {model_name}")
         
     def load_state(self):
         """Load the current model state from file."""
@@ -255,32 +297,103 @@ class ModelFleetManager:
         return self.update_alpha_generator_config(self.get_current_model().name)
 
 class AlphaOrchestrator:
-    def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434"):
+    def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434",
+                 config_path: Optional[str] = None, model_override: Optional[str] = None):
         self.sess = requests.Session()
         self.credentials_path = credentials_path
         self.ollama_url = ollama_url
+        self.config_path = config_path
+        self.model_override = model_override
         self.setup_auth(credentials_path)
         self.last_submission_date = None
         self.submission_log_file = "submission_log.json"
         self.load_submission_history()
-        
+
+        # 加载配置
+        self.config = None
+        if CONFIG_AVAILABLE:
+            self.config_manager = get_config_manager(config_path)
+            self.config = self.config_manager.config
+
         # Concurrency control
-        self.max_concurrent_simulations = 3
+        self.max_concurrent_simulations = self.config.max_concurrent if self.config else 3
         self.simulation_semaphore = threading.Semaphore(self.max_concurrent_simulations)
         self.running = True
         self.generator_process = None
         self.miner_process = None
-        
+        self._child_processes = []  # 跟踪所有子进程
+
         # Model fleet management
-        self.model_fleet_manager = ModelFleetManager(ollama_url)
+        self.model_fleet_manager = ModelFleetManager(ollama_url, config_path, model_override)
         self.vram_monitoring_active = False
         self.vram_monitor_thread = None
-        
+
         # Restart mechanism
         self.restart_interval = 1800  # 30 minutes in seconds
         self.last_restart_time = time.time()
         self.restart_thread = None
-        
+
+        # 注册退出清理函数
+        self._setup_cleanup_handlers()
+
+    def _setup_cleanup_handlers(self):
+        """设置退出时的清理处理器"""
+        def cleanup_handler(signum=None, frame=None):
+            logger.info("收到退出信号，正在清理子进程...")
+            self.cleanup_child_processes()
+            sys.exit(0)
+
+        # 注册信号处理
+        signal.signal(signal.SIGINT, cleanup_handler)
+        signal.signal(signal.SIGTERM, cleanup_handler)
+
+        # 注册 atexit 处理器（用于正常退出）
+        atexit.register(self.cleanup_child_processes)
+
+    def cleanup_child_processes(self):
+        """清理所有子进程"""
+        self.running = False
+
+        # 终止 generator_process
+        if self.generator_process and self.generator_process.poll() is None:
+            logger.info(f"正在终止 generator_process (PID: {self.generator_process.pid})")
+            try:
+                self.generator_process.terminate()
+                self.generator_process.wait(timeout=5)
+            except:
+                try:
+                    self.generator_process.kill()
+                except:
+                    pass
+
+        # 终止 miner_process
+        if self.miner_process and self.miner_process.poll() is None:
+            logger.info(f"正在终止 miner_process (PID: {self.miner_process.pid})")
+            try:
+                self.miner_process.terminate()
+                self.miner_process.wait(timeout=5)
+            except:
+                try:
+                    self.miner_process.kill()
+                except:
+                    pass
+
+        # 终止所有跟踪的子进程
+        for proc in self._child_processes:
+            if proc.poll() is None:
+                logger.info(f"正在终止子进程 (PID: {proc.pid})")
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                except:
+                    try:
+                        proc.kill()
+                    except:
+                        pass
+
+        self._child_processes.clear()
+        logger.info("所有子进程已清理")
+
     def setup_auth(self, credentials_path: str) -> None:
         """Set up authentication with WorldQuant Brain."""
         logger.info(f"Loading credentials from {credentials_path}")
@@ -592,7 +705,9 @@ class AlphaOrchestrator:
                 '--ollama-model', current_model,
                 '--max-concurrent', str(self.max_concurrent_simulations)
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            
+
+            # 添加到子进程跟踪列表
+            self._child_processes.append(self.generator_process)
             logger.info(f"Alpha generator started with PID: {self.generator_process.pid}")
             
         except Exception as e:
@@ -761,46 +876,84 @@ def main():
                       help='Path to credentials file (default: ./credential.txt)')
     parser.add_argument('--ollama-url', type=str, default='http://localhost:11434',
                       help='Ollama API URL (default: http://localhost:11434)')
-    parser.add_argument('--mode', type=str, choices=['daily', 'continuous', 'miner', 'submitter', 'generator', 'fleet-status', 'fleet-reset', 'fleet-downgrade', 'fleet-reset-app', 'restart'],
+    parser.add_argument('--mode', type=str, choices=['daily', 'continuous', 'miner', 'submitter', 'generator', 'fleet-status', 'fleet-reset', 'fleet-downgrade', 'fleet-reset-app', 'restart', 'select-model'],
                       default='continuous', help='Operation mode (default: continuous)')
-    parser.add_argument('--mining-interval', type=int, default=6,
-                      help='Mining interval in hours for continuous mode (default: 6)')
-    parser.add_argument('--batch-size', type=int, default=3,
-                      help='Batch size for operations (default: 3)')
-    parser.add_argument('--max-concurrent', type=int, default=3,
-                      help='Maximum concurrent simulations (default: 3)')
+    parser.add_argument('--mining-interval', type=int, default=None,
+                      help='Mining interval in hours for continuous mode (default: from config or 6)')
+    parser.add_argument('--batch-size', type=int, default=None,
+                      help='Batch size for operations (default: from config or 3)')
+    parser.add_argument('--max-concurrent', type=int, default=None,
+                      help='Maximum concurrent simulations (default: from config or 3)')
     parser.add_argument('--restart-interval', type=int, default=30,
                       help='Restart interval in minutes (default: 30)')
-    parser.add_argument('--ollama-model', type=str, default='deepseek-r1:8b',
-                      help='Ollama model to use (default: deepseek-r1:8b)')
-    
+    parser.add_argument('--ollama-model', type=str, default=None,
+                      help='Ollama model to use (default: from config or llama3:8b)')
+    parser.add_argument('--config', type=str, default='config.json',
+                      help='Path to config file (default: config.json)')
+    parser.add_argument('--select-model', action='store_true',
+                      help='启动时交互式选择模型')
+
     args = parser.parse_args()
-    
+
+    # 模型选择模式
+    if args.mode == 'select-model' or args.select_model:
+        try:
+            from model_selector import main as model_selector_main
+            model_selector_main()
+        except ImportError:
+            logger.error("model_selector 模块未找到")
+            print("[错误] 请确保 model_selector.py 存在")
+        return 0
+
+    # 加载配置
+    config = None
+    if CONFIG_AVAILABLE:
+        config_manager = get_config_manager(args.config)
+        config = config_manager.config
+
+    # 确定参数值（命令行 > 配置文件 > 默认值）
+    mining_interval = args.mining_interval or (config.mining_interval_hours if config else 6)
+    batch_size = args.batch_size or (config.batch_size if config else 3)
+    max_concurrent = args.max_concurrent or (config.max_concurrent if config else 3)
+    ollama_model = args.ollama_model or (config.default_model if config else 'llama3:8b')
+
+    # 如果没有指定模型且配置可用，尝试交互式选择
+    if not args.ollama_model and not args.select_model:
+        try:
+            # 检查是否有环境变量指定模型
+            env_model = os.environ.get('SELECTED_MODEL')
+            if env_model:
+                ollama_model = env_model
+                logger.info(f"使用环境变量指定的模型: {ollama_model}")
+        except:
+            pass
+
     try:
-        orchestrator = AlphaOrchestrator(args.credentials, args.ollama_url)
-        orchestrator.max_concurrent_simulations = args.max_concurrent
+        orchestrator = AlphaOrchestrator(
+            args.credentials,
+            args.ollama_url,
+            config_path=args.config,
+            model_override=ollama_model
+        )
+        orchestrator.max_concurrent_simulations = max_concurrent
         orchestrator.restart_interval = args.restart_interval * 60  # Convert minutes to seconds
-        
-        # Update the model fleet to use the specified model
-        if args.ollama_model:
-            # Find the model in the fleet and set it as current
-            for i, model_info in enumerate(orchestrator.model_fleet_manager.model_fleet):
-                if model_info.name == args.ollama_model:
-                    orchestrator.model_fleet_manager.current_model_index = i
-                    orchestrator.model_fleet_manager.save_state()
-                    logger.info(f"Set model fleet to use: {args.ollama_model}")
-                    break
-        
+
+        logger.info(f"配置信息:")
+        logger.info(f"  - 模型: {ollama_model}")
+        logger.info(f"  - 批次大小: {batch_size}")
+        logger.info(f"  - 最大并发: {max_concurrent}")
+        logger.info(f"  - 挖掘间隔: {mining_interval} 小时")
+
         if args.mode == 'daily':
             orchestrator.daily_workflow()
         elif args.mode == 'continuous':
-            orchestrator.continuous_mining(args.mining_interval)
+            orchestrator.continuous_mining(mining_interval)
         elif args.mode == 'miner':
             orchestrator.run_alpha_expression_miner()
         elif args.mode == 'submitter':
-            orchestrator.run_alpha_submitter(args.batch_size)
+            orchestrator.run_alpha_submitter(batch_size)
         elif args.mode == 'generator':
-            orchestrator.run_alpha_generator(args.batch_size)
+            orchestrator.run_alpha_generator(batch_size)
         elif args.mode == 'fleet-status':
             status = orchestrator.get_model_fleet_status()
             print(json.dumps(status, indent=2))
@@ -816,11 +969,11 @@ def main():
         elif args.mode == 'restart':
             orchestrator.restart_all_processes()
             print("Manual restart completed")
-            
+
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         return 1
-    
+
     return 0
 
 if __name__ == "__main__":

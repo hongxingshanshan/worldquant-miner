@@ -79,7 +79,7 @@ class AlphaDashboard:
         return {"status": "not_responding", "error": "Ollama service not available"}
     
     def get_orchestrator_status(self) -> Dict:
-        """Get orchestrator status from Docker container logs."""
+        """Get orchestrator status from log files."""
         status = {
             "status": "unknown",
             "last_activity": None,
@@ -87,31 +87,28 @@ class AlphaDashboard:
             "next_mining": None,
             "next_submission": None
         }
-        
+
         try:
-            # Try to get Docker container logs
-            result = subprocess.run([
-                "docker", "logs", "--tail", "50", "naive-ollma-gpu"
-            ], capture_output=True, text=True, timeout=10)
-            
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                if lines:
-                    last_line = lines[-1].strip()
-                    status["last_activity"] = last_line
-                    
-                    # Check for recent activity in Docker logs
-                    for line in reversed(lines[-50:]):
-                        if any(keyword in line for keyword in ["alpha generator", "generating alpha", "Running alpha", "alpha idea"]):
-                            status["status"] = "active"
-                            break
-                        elif any(keyword in line for keyword in ["Error", "Failed", "Exception"]):
-                            status["status"] = "error"
-                            break
-                        elif "ollama" in line.lower() and "started" in line.lower():
-                            status["status"] = "active"
-                            break
-                
+            # Read from local log file instead of Docker
+            if os.path.exists(self.log_file):
+                with open(self.log_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    if lines:
+                        last_line = lines[-1].strip()
+                        status["last_activity"] = last_line
+
+                        # Check for recent activity in logs
+                        for line in reversed(lines[-50:]):
+                            if any(keyword in line for keyword in ["alpha generator", "generating alpha", "Running alpha", "alpha idea", "Processing batch"]):
+                                status["status"] = "active"
+                                break
+                            elif any(keyword in line for keyword in ["Error", "Failed", "Exception"]):
+                                status["status"] = "error"
+                                break
+                            elif "started" in line.lower():
+                                status["status"] = "active"
+                                break
+
                 # Check submission schedule
                 if os.path.exists(self.submission_log_file):
                     with open(self.submission_log_file, 'r') as f:
@@ -122,7 +119,7 @@ class AlphaDashboard:
                             next_submission = last_date + timedelta(days=1)
                             next_submission = next_submission.replace(hour=14, minute=0, second=0, microsecond=0)
                             status["next_submission"] = next_submission.isoformat()
-                
+
                 # Calculate next mining time (every 6 hours)
                 now = datetime.now()
                 hours_since_midnight = now.hour + now.minute / 60
@@ -131,10 +128,10 @@ class AlphaDashboard:
                 if next_mining <= now:
                     next_mining += timedelta(days=1)
                 status["next_mining"] = next_mining.isoformat()
-                
+
         except Exception as e:
             logger.warning(f"Could not get orchestrator status: {e}")
-        
+
         return status
     
     def get_worldquant_status(self) -> Dict:
@@ -158,89 +155,36 @@ class AlphaDashboard:
         return {"status": "unknown", "message": "Could not verify connection"}
     
     def get_recent_activity(self) -> List[Dict]:
-        """Get recent activity from Docker container logs."""
+        """Get recent activity from log files."""
         activities = []
-        
+
         try:
-            # Get logs from Docker container
-            result = subprocess.run([
-                "docker", "logs", "--tail", "20", "naive-ollma-gpu"
-            ], capture_output=True, text=True, timeout=10)
-            
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                # Get last 20 lines
-                for line in lines[-20:]:
-                    line = line.strip()
-                    if line and not line.startswith('---'):
-                        # Parse timestamp and message
-                        try:
-                            # Try to parse Docker log format
-                            if 'time=' in line:
-                                # Docker log format: time=2025-08-10T21:48:18.314Z level=INFO source=server.go:637 msg="..."
-                                parts = line.split('msg="')
-                                if len(parts) > 1:
-                                    timestamp_part = parts[0].split('time=')[1].split(' ')[0]
-                                    message = parts[1].rstrip('"')
-                                    timestamp = datetime.fromisoformat(timestamp_part.replace('Z', '+00:00'))
+            # Read from local log file
+            if os.path.exists(self.log_file):
+                with open(self.log_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    # Get last 20 lines
+                    for line in lines[-20:]:
+                        line = line.strip()
+                        if line and not line.startswith('---'):
+                            try:
+                                if ' - ' in line:
+                                    timestamp_str, message = line.split(' - ', 1)
+                                    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
                                     activities.append({
                                         "timestamp": timestamp.isoformat(),
                                         "message": message,
-                                        "type": "info" if "INFO" in line else "error" if "ERROR" in line else "warning" if "WARNING" in line else "debug"
+                                        "type": "info" if "INFO" in message else "error" if "ERROR" in message else "warning" if "WARNING" in message else "debug"
                                     })
-                                else:
-                                    activities.append({
-                                        "timestamp": datetime.now().isoformat(),
-                                        "message": line,
-                                        "type": "unknown"
-                                    })
-                            elif ' - ' in line:
-                                # Standard log format
-                                timestamp_str, message = line.split(' - ', 1)
-                                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                                activities.append({
-                                    "timestamp": timestamp.isoformat(),
-                                    "message": message,
-                                    "type": "info" if "INFO" in message else "error" if "ERROR" in message else "warning" if "WARNING" in message else "debug"
-                                })
-                            else:
+                            except:
                                 activities.append({
                                     "timestamp": datetime.now().isoformat(),
                                     "message": line,
                                     "type": "unknown"
                                 })
-                        except:
-                            activities.append({
-                                "timestamp": datetime.now().isoformat(),
-                                "message": line,
-                                "type": "unknown"
-                            })
-            else:
-                # Fallback to local log file
-                if os.path.exists(self.log_file):
-                    with open(self.log_file, 'r') as f:
-                        lines = f.readlines()
-                        for line in lines[-20:]:
-                            line = line.strip()
-                            if line and not line.startswith('---'):
-                                try:
-                                    if ' - ' in line:
-                                        timestamp_str, message = line.split(' - ', 1)
-                                        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                                        activities.append({
-                                            "timestamp": timestamp.isoformat(),
-                                            "message": message,
-                                            "type": "info" if "INFO" in message else "error" if "ERROR" in message else "warning" if "WARNING" in message else "debug"
-                                        })
-                                except:
-                                    activities.append({
-                                        "timestamp": datetime.now().isoformat(),
-                                        "message": line,
-                                        "type": "unknown"
-                                    })
         except Exception as e:
             logger.warning(f"Could not read recent activity: {e}")
-        
+
         return activities[-10:]  # Return last 10 activities
     
     def get_statistics(self) -> Dict:
@@ -290,65 +234,42 @@ class AlphaDashboard:
         return stats
     
     def get_logs(self, lines: int = 50) -> List[str]:
-        """Get recent logs from Docker container."""
+        """Get recent logs from log files."""
         logs = []
         try:
-            # Get logs from Docker container
-            result = subprocess.run([
-                "docker", "logs", "--tail", str(lines), "naive-ollma-gpu"
-            ], capture_output=True, text=True, timeout=10)
-            
-            if result.returncode == 0:
-                logs = result.stdout.strip().split('\n')
-            else:
-                # Fallback to local log file if Docker fails
-                if os.path.exists(self.log_file):
-                    with open(self.log_file, 'r') as f:
-                        lines_list = f.readlines()
-                        logs = lines_list[-lines:] if len(lines_list) > lines else lines_list
+            # Read from local log file
+            if os.path.exists(self.log_file):
+                with open(self.log_file, 'r', encoding='utf-8') as f:
+                    lines_list = f.readlines()
+                    logs = lines_list[-lines:] if len(lines_list) > lines else lines_list
         except Exception as e:
             logger.warning(f"Could not read logs: {e}")
-            # Fallback to local log file
-            try:
-                if os.path.exists(self.log_file):
-                    with open(self.log_file, 'r') as f:
-                        lines_list = f.readlines()
-                        logs = lines_list[-lines:] if len(lines_list) > lines else lines_list
-            except:
-                pass
-        
+
         return [line.strip() for line in logs if line.strip()]
-    
+
     def get_alpha_generator_logs(self, lines: int = 50) -> List[str]:
         """Get alpha generator specific logs."""
         logs = []
+        alpha_log_file = "alpha_generator_ollama.log"
         try:
-            # Get logs from Docker container and filter for alpha generator content
-            result = subprocess.run([
-                "docker", "logs", "--tail", str(lines * 2), "naive-ollma-gpu"
-            ], capture_output=True, text=True, timeout=10)
-            
-            if result.returncode == 0:
-                all_logs = result.stdout.strip().split('\n')
-                # Filter for alpha generator related logs
-                alpha_logs = []
-                for line in all_logs:
-                    line_lower = line.lower()
-                    if any(keyword in line_lower for keyword in [
-                        'alpha', 'generator', 'generating', 'ollama', 'model', 'prompt',
-                        'response', 'idea', 'factor', 'worldquant', 'submission'
-                    ]):
-                        alpha_logs.append(line)
-                logs = alpha_logs[-lines:] if len(alpha_logs) > lines else alpha_logs
-            else:
-                # Fallback to local log file
-                if os.path.exists(self.log_file):
-                    with open(self.log_file, 'r') as f:
-                        lines_list = f.readlines()
-                        logs = lines_list[-lines:] if len(lines_list) > lines else lines_list
+            # Read from alpha generator log file
+            if os.path.exists(alpha_log_file):
+                with open(alpha_log_file, 'r', encoding='utf-8') as f:
+                    all_logs = f.readlines()
+                    # Filter for alpha generator related logs
+                    alpha_logs = []
+                    for line in all_logs:
+                        line_lower = line.lower()
+                        if any(keyword in line_lower for keyword in [
+                            'alpha', 'generator', 'generating', 'ollama', 'model', 'prompt',
+                            'response', 'idea', 'factor', 'worldquant', 'submission',
+                            'batch', 'simulation', 'fitness'
+                        ]):
+                            alpha_logs.append(line)
+                    logs = alpha_logs[-lines:] if len(alpha_logs) > lines else alpha_logs
         except Exception as e:
             logger.warning(f"Could not read alpha generator logs: {e}")
-        
+
         return [line.strip() for line in logs if line.strip()]
     
     def trigger_mining(self) -> Dict:

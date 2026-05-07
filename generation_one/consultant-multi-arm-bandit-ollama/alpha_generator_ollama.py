@@ -13,6 +13,13 @@ from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 
+# 尝试导入配置管理器
+try:
+    from config_manager import get_config_manager, ConfigManager
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -53,7 +60,7 @@ class RetryQueue:
             time.sleep(1)  # Prevent busy waiting
 
 class AlphaGenerator:
-    def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434", max_concurrent: int = 2):
+    def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434", max_concurrent: int = 2, config_path: str = "config.json"):
         self.sess = requests.Session()
         self.credentials_path = credentials_path  # Store path for reauth
         self.setup_auth(credentials_path)
@@ -65,19 +72,39 @@ class AlphaGenerator:
         self.executor = ThreadPoolExecutor(max_workers=max_concurrent)  # For concurrent simulations
         self.vram_cleanup_interval = 10  # Cleanup every 10 operations
         self.operation_count = 0
-        
-        # Model downgrade tracking
-        self.initial_model = getattr(self, 'model_name', 'deepseek-r1:8b')
+        self.config_path = config_path
+
+        # 从配置文件加载模型舰队
+        self.model_fleet = self._load_model_fleet()
+        self.initial_model = getattr(self, 'model_name', self.model_fleet[0] if self.model_fleet else 'llama3:8b')
         self.error_count = 0
         self.max_errors_before_downgrade = 3
-        self.model_fleet = [
-            'deepseek-r1:8b',   # Primary model
-            'deepseek-r1:7b',   # First fallback
-            'deepseek-r1:1.5b', # Second fallback
-            'llama3:3b',        # Third fallback
-            'phi3:mini'         # Emergency fallback
-        ]
         self.current_model_index = 0
+
+    def _load_model_fleet(self) -> List[str]:
+        """从配置文件加载模型舰队"""
+        # 尝试从配置管理器加载
+        if CONFIG_AVAILABLE:
+            try:
+                config_manager = get_config_manager(self.config_path)
+                return config_manager.get_model_fleet_names()
+            except Exception as e:
+                logger.warning(f"从配置管理器加载模型舰队失败: {e}")
+
+        # 尝试直接读取配置文件
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    fleet_data = data.get('model_fleet', [])
+                    if fleet_data:
+                        return [m.get('name') for m in fleet_data if m.get('name')]
+            except Exception as e:
+                logger.warning(f"读取配置文件失败: {e}")
+
+        # 使用默认值
+        logger.info("使用默认模型舰队配置")
+        return ['llama3:8b', 'qwen2.5-coder:1.5b']
         
     def setup_auth(self, credentials_path: str) -> None:
         """Set up authentication with WorldQuant Brain."""
@@ -1047,8 +1074,8 @@ def main():
                       help='Set the logging level (default: INFO)')
     parser.add_argument('--ollama-url', type=str, default='http://localhost:11434',
                       help='Ollama API URL (default: http://localhost:11434)')
-    parser.add_argument('--ollama-model', type=str, default='deepseek-r1:8b',
-                                             help='Ollama model to use (default: deepseek-r1:8b for RTX A4000)')
+    parser.add_argument('--ollama-model', type=str, default=None,
+                      help='Ollama model to use (default: from config.json or llama3:8b)')
     parser.add_argument('--max-concurrent', type=int, default=2,
                       help='Maximum concurrent simulations (default: 2)')
     parser.add_argument('--multi-simulate', type=str, default='false',
@@ -1057,7 +1084,9 @@ def main():
                       help='Batch size for multi-simulate (default: 10)')
     parser.add_argument('--concurrent-batches', type=int, default=10,
                       help='Number of concurrent batches for multi-simulate (default: 10)')
-    
+    parser.add_argument('--config', type=str, default='config.json',
+                      help='Path to configuration file (default: config.json)')
+
     args = parser.parse_args()
     
     # Configure logging
@@ -1072,12 +1101,25 @@ def main():
     
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
+    # 确定要使用的模型
+    model_name = args.ollama_model
+    if model_name is None and CONFIG_AVAILABLE:
+        try:
+            config_manager = get_config_manager(args.config)
+            model_name = config_manager.config.default_model
+            logging.info(f"从配置文件加载默认模型: {model_name}")
+        except Exception as e:
+            logging.warning(f"从配置文件加载模型失败: {e}")
+    if model_name is None:
+        model_name = 'llama3:8b'
+        logging.info(f"使用后备默认模型: {model_name}")
+
     try:
         # Initialize alpha generator with Ollama
-        generator = AlphaGenerator(args.credentials, args.ollama_url, args.max_concurrent)
-        generator.model_name = args.ollama_model  # Set the model name
-        generator.initial_model = args.ollama_model  # Set the initial model for reset
+        generator = AlphaGenerator(args.credentials, args.ollama_url, args.max_concurrent, args.config)
+        generator.model_name = model_name  # Set the model name
+        generator.initial_model = model_name  # Set the initial model for reset
         
         # Set multi-simulate parameters
         generator.multi_simulate_enabled = args.multi_simulate.lower() == 'true'

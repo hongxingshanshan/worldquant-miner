@@ -1,0 +1,40 @@
+{
+  "ollama": {
+    "api_url": "http://localhost:11434",
+    "default_model": "llama3:8b",
+    "fallback_model": "qwen2.5-coder:1.5b"
+  },
+  "model_fleet": [
+    {
+      "name": "llama3:8b",
+      "size_mb": 4661,
+      "priority": 1,
+      "description": "Llama 3 8B - Primary model"
+    },
+    {
+      "name": "qwen2.5-coder:1.5b",
+      "size_mb": 986,
+      "priority": 2,
+      "description": "Qwen 2.5 Coder 1.5B - Fallback model"
+    }
+  ],
+  "mining": {
+    "batch_size": 3,
+    "max_concurrent": 2,
+    "mining_interval_hours": 6,
+    "sleep_time": 30
+  },
+  "simulation": {
+    "instrument_type": "EQUITY",
+    "region": "USA",
+    "universe": "TOP3000",
+    "delay": 1,
+    "decay": 0,
+    "neutralization": "INDUSTRY",
+    "truncation": 0.08
+  },
+  "thresholds": {
+    "min_fitness": 0.5,
+    "min_sharpe": 1.0
+  }
+}
