@@ -83,9 +83,9 @@ class AlphaDashboard:
         return {"status": "not_responding", "error": "Ollama service not available"}
     
     def get_orchestrator_status(self) -> Dict:
-        """Get orchestrator status from log files."""
+        """Get orchestrator status from log files and process check."""
         status = {
-            "status": "unknown",
+            "status": "stopped",  # 默认为停止状态
             "last_activity": None,
             "current_mode": "continuous",
             "next_mining": None,
@@ -93,7 +93,25 @@ class AlphaDashboard:
         }
 
         try:
-            # Read from local log file instead of Docker
+            # 首先检查进程是否在运行
+            import psutil
+            orchestrator_running = False
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if 'python' in proc.info['name'].lower():
+                        cmdline = ' '.join(proc.info['cmdline'] or [])
+                        if 'alpha_orchestrator' in cmdline:
+                            orchestrator_running = True
+                            break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            if orchestrator_running:
+                status["status"] = "active"
+            else:
+                status["status"] = "stopped"
+
+            # Read from local log file
             if os.path.exists(self.log_file):
                 with open(self.log_file, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
@@ -101,17 +119,12 @@ class AlphaDashboard:
                         last_line = lines[-1].strip()
                         status["last_activity"] = last_line
 
-                        # Check for recent activity in logs
-                        for line in reversed(lines[-50:]):
-                            if any(keyword in line for keyword in ["alpha generator", "generating alpha", "Running alpha", "alpha idea", "Processing batch"]):
-                                status["status"] = "active"
-                                break
-                            elif any(keyword in line for keyword in ["Error", "Failed", "Exception"]):
-                                status["status"] = "error"
-                                break
-                            elif "started" in line.lower():
-                                status["status"] = "active"
-                                break
+                        # 如果进程在运行，检查日志中的错误
+                        if orchestrator_running:
+                            for line in reversed(lines[-50:]):
+                                if any(keyword in line for keyword in ["Error", "Failed", "Exception"]):
+                                    status["status"] = "error"
+                                    break
 
                 # Check submission schedule
                 if os.path.exists(self.submission_log_file):
