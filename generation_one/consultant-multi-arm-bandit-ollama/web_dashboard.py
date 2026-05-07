@@ -390,7 +390,15 @@ def get_ollama_status():
 def get_orchestrator_status():
     """Check if alpha orchestrator is running."""
     try:
-        return os.path.exists('orchestrator_state.json')
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if 'python' in proc.info['name'].lower():
+                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    if 'alpha_orchestrator' in cmdline:
+                        return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return False
     except:
         return False
 

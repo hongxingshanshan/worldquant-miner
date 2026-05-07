@@ -12,6 +12,7 @@ import sys
 import ctypes
 import signal
 import atexit
+import psutil
 
 app = Flask(__name__)
 
@@ -83,39 +84,48 @@ class AlphaDashboard:
         return {"status": "not_responding", "error": "Ollama service not available"}
     
     def get_orchestrator_status(self) -> Dict:
-        """Get orchestrator status from Docker container logs."""
+        """Get orchestrator status from log files and process check."""
         status = {
-            "status": "unknown",
+            "status": "stopped",  # 默认为停止状态
             "last_activity": None,
             "current_mode": "continuous",
             "next_mining": None,
             "next_submission": None
         }
-        
+
         try:
-            # Try to get Docker container logs
-            result = subprocess.run([
-                "docker", "logs", "--tail", "50", "naive-ollma-gpu"
-            ], capture_output=True, text=True, timeout=10)
-            
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                if lines:
-                    last_line = lines[-1].strip()
-                    status["last_activity"] = last_line
-                    
-                    # Check for recent activity in Docker logs
-                    for line in reversed(lines[-50:]):
-                        if any(keyword in line for keyword in ["alpha generator", "generating alpha", "Running alpha", "alpha idea"]):
-                            status["status"] = "active"
+            # 首先检查进程是否在运行
+            orchestrator_running = False
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if 'python' in proc.info['name'].lower():
+                        cmdline = ' '.join(proc.info['cmdline'] or [])
+                        if 'alpha_orchestrator' in cmdline:
+                            orchestrator_running = True
                             break
-                        elif any(keyword in line for keyword in ["Error", "Failed", "Exception"]):
-                            status["status"] = "error"
-                            break
-                        elif "ollama" in line.lower() and "started" in line.lower():
-                            status["status"] = "active"
-                            break
-                
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            if orchestrator_running:
+                status["status"] = "active"
+            else:
+                status["status"] = "stopped"
+
+            # Read from local log file
+            if os.path.exists(self.log_file):
+                with open(self.log_file, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    if lines:
+                        last_line = lines[-1].strip()
+                        status["last_activity"] = last_line
+
+                        # 如果进程在运行，检查日志中的错误
+                        if orchestrator_running:
+                            for line in reversed(lines[-50:]):
+                                if any(keyword in line for keyword in ["Error", "Failed", "Exception"]):
+                                    status["status"] = "error"
+                                    break
+
                 # Check submission schedule
                 if os.path.exists(self.submission_log_file):
                     with open(self.submission_log_file, 'r') as f:
@@ -126,7 +136,7 @@ class AlphaDashboard:
                             next_submission = last_date + timedelta(days=1)
                             next_submission = next_submission.replace(hour=14, minute=0, second=0, microsecond=0)
                             status["next_submission"] = next_submission.isoformat()
-                
+
                 # Calculate next mining time (every 6 hours)
                 now = datetime.now()
                 hours_since_midnight = now.hour + now.minute / 60
@@ -135,7 +145,7 @@ class AlphaDashboard:
                 if next_mining <= now:
                     next_mining += timedelta(days=1)
                 status["next_mining"] = next_mining.isoformat()
-                
+
         except Exception as e:
             logger.warning(f"Could not get orchestrator status: {e}")
         

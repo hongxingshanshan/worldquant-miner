@@ -981,16 +981,25 @@ def setup_cleanup_handler(generator):
         try:
             CTRL_HANDLER_TYPE = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
 
+            # 保存 handler 引用，防止被垃圾回收
+            ctrl_handler = None
+
             def console_ctrl_handler(ctrl_type):
                 if ctrl_type in (2, 5, 6):
-                    logging.info(f"收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在关闭...")
+                    # 使用 print 而不是 logger，因为 logger 可能已经不可用
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在关闭...")
+                    # 强制刷新输出
+                    sys.stdout.flush()
                     cleanup()
                     return True
                 return False
 
-            handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
-            ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
-            logging.info("已注册 Windows 控制台关闭事件处理器")
+            ctrl_handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
+            result = ctypes.windll.kernel32.SetConsoleCtrlHandler(ctrl_handler, True)
+            if result:
+                logging.info("已注册 Windows 控制台关闭事件处理器")
+            else:
+                logging.warning("注册 Windows 控制台事件处理器失败")
         except Exception as e:
             logging.warning(f"无法注册 Windows 控制台事件处理器: {e}")
 

@@ -199,19 +199,28 @@ class AlphaOrchestrator:
                 # 定义控制台事件类型
                 CTRL_HANDLER_TYPE = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_uint)
 
+                # 保存 handler 引用，防止被垃圾回收
+                self._ctrl_handler = None
+
                 def console_ctrl_handler(ctrl_type):
                     """处理 Windows 控制台事件"""
                     # CTRL_CLOSE_EVENT = 2, CTRL_LOGOFF_EVENT = 5, CTRL_SHUTDOWN_EVENT = 6
                     if ctrl_type in (2, 5, 6):
-                        logger.info(f"收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在清理子进程...")
+                        # 使用 print 而不是 logger，因为 logger 可能已经不可用
+                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在清理子进程...")
+                        # 强制刷新输出
+                        sys.stdout.flush()
                         self.cleanup_child_processes()
                         return True
                     return False
 
                 # 设置控制台处理器
-                handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
-                ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
-                logger.info("已注册 Windows 控制台关闭事件处理器")
+                self._ctrl_handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
+                result = ctypes.windll.kernel32.SetConsoleCtrlHandler(self._ctrl_handler, True)
+                if result:
+                    logger.info("已注册 Windows 控制台关闭事件处理器")
+                else:
+                    logger.warning("注册 Windows 控制台事件处理器失败")
             except Exception as e:
                 logger.warning(f"无法注册 Windows 控制台事件处理器: {e}")
 

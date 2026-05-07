@@ -12,6 +12,7 @@ import sys
 import ctypes
 import signal
 import atexit
+import psutil
 
 app = Flask(__name__)
 
@@ -94,7 +95,6 @@ class AlphaDashboard:
 
         try:
             # 首先检查进程是否在运行
-            import psutil
             orchestrator_running = False
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
