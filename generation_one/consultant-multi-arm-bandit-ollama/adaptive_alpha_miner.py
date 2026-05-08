@@ -374,13 +374,12 @@ class AdaptiveAlphaMiner:
         logger.info("Authentication successful")
     
     def _select_region(self) -> str:
-        """Select a random region to use consistently throughout mining."""
-        region_options = ["USA", "GLB", "EUR", "ASI", "CHN"]
-        
-        # Randomly select a region
-        region = random.choice(region_options)
-        
-        logger.info(f"Randomly selected region: {region}")
+        """Select a region to use consistently throughout mining."""
+        # 优先使用 USA 区域，因为数据集最丰富
+        # 如果需要随机选择，可以从配置中设置
+        region = "USA"
+
+        logger.info(f"Selected region: {region}")
         return region
     
     def _get_universe_for_region(self, region: str) -> str:
