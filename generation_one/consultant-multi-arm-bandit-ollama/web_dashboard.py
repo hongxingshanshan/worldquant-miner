@@ -436,7 +436,17 @@ def get_ollama_info():
         if response.status_code == 200:
             data = response.json()
             models = data.get('models', [])
-            current_model = 'deepseek-r1:8b'  # Default model
+
+            # 从配置文件读取默认模型
+            current_model = 'llama3:8b'  # 默认值
+            try:
+                if os.path.exists('config.json'):
+                    with open('config.json', 'r') as f:
+                        config = json.load(f)
+                        current_model = config.get('ollama', {}).get('default_model', 'llama3:8b')
+            except:
+                pass
+
             return {
                 'current_model': current_model,
                 'model_loaded': len(models) > 0,
