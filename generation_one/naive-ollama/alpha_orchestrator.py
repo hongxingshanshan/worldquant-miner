@@ -666,16 +666,15 @@ class AlphaOrchestrator:
     def run_alpha_submitter(self, batch_size: int = 5):
         """Run alpha submitter with daily rate limiting."""
         logger.info("Starting alpha submitter...")
-        
+
         if not self.can_submit_today():
             return
-        
+
         try:
             # Run the alpha submitter as a subprocess
             result = subprocess.run([
-                sys.executable, 'successful_alpha_submitter.py',
-                '--batch-size', str(batch_size),
-                '--auto-mode'  # Run in automated mode
+                sys.executable, 'improved_alpha_submitter.py',
+                '--batch-size', str(batch_size)
             ], capture_output=True, text=True, timeout=600)
             
             if result.returncode == 0:
