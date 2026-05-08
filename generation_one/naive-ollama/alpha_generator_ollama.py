@@ -8,6 +8,7 @@ from typing import List, Dict
 import time
 import re
 import logging
+import logging.handlers
 from queue import Queue
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,6 +17,7 @@ import sys
 import ctypes
 import signal
 import atexit
+import queue
 
 # 尝试导入配置管理器
 try:
@@ -31,8 +33,31 @@ try:
 except ImportError:
     LLM_CLIENT_AVAILABLE = False
 
-# Configure logger
-logger = logging.getLogger(__name__)
+# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
+# 创建日志队列
+log_queue = queue.Queue(-1)  # 无限大小
+
+# 创建 QueueHandler
+queue_handler = logging.handlers.QueueHandler(log_queue)
+
+# 创建实际的 handlers
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+file_handler = logging.FileHandler('alpha_generator_ollama.log', mode='a', encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# 创建 QueueListener（在主线程启动）
+queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
+queue_listener.start()
+
+# 创建 logger 并添加 QueueHandler
+logger = logging.getLogger('alpha_generator')
+logger.setLevel(logging.INFO)
+logger.addHandler(queue_handler)
+logger.propagate = False  # 不传播到 root logger
 
 # 知识库路径（统一存放在项目根目录的 knowledge_base 文件夹）
 KNOWLEDGE_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -328,13 +353,13 @@ class RetryQueue:
             if not self.queue.empty():
                 alpha, retry_count = self.queue.get()
                 if retry_count >= self.max_retries:
-                    logging.error(f"Max retries exceeded for alpha: {alpha}")
+                    logger.error(f"Max retries exceeded for alpha: {alpha}")
                     continue
-                    
+
                 try:
                     result = self.generator._test_alpha_impl(alpha)  # Use _test_alpha_impl to avoid recursion
                     if result.get("status") == "error" and "SIMULATION_LIMIT_EXCEEDED" in result.get("message", ""):
-                        logging.info(f"Simulation limit exceeded, requeueing alpha: {alpha}")
+                        logger.info(f"Simulation limit exceeded, requeueing alpha: {alpha}")
                         time.sleep(self.retry_delay)
                         self.add(alpha, retry_count + 1)
                     else:
@@ -343,7 +368,7 @@ class RetryQueue:
                             "result": result
                         })
                 except Exception as e:
-                    logging.error(f"Error processing alpha: {str(e)}")
+                    logger.error(f"Error processing alpha: {str(e)}")
                     
             time.sleep(1)  # Prevent busy waiting
 
@@ -1310,15 +1335,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),  # Log to console
-            logging.FileHandler('alpha_generator_ollama.log')  # Also log to file
-        ]
-    )
+    # 更新日志级别（如果需要）
+    if args.log_level != 'INFO':
+        logger.setLevel(getattr(logging, args.log_level))
+        stream_handler.setLevel(getattr(logging, args.log_level))
+        file_handler.setLevel(getattr(logging, args.log_level))
 
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
@@ -1329,9 +1350,9 @@ def main():
         try:
             config_manager = get_config_manager(args.config)
             model_name = config_manager.config.default_model
-            logging.info(f"从配置文件加载默认模型: {model_name}")
+            logger.info(f"从配置文件加载默认模型: {model_name}")
         except Exception as e:
-            logging.warning(f"从配置文件加载模型失败: {e}")
+            logger.warning(f"从配置文件加载模型失败: {e}")
     if model_name is None:
         model_name = 'llama3:8b'
         logging.info(f"使用后备默认模型: {model_name}")
@@ -1409,17 +1430,23 @@ def main():
 def setup_cleanup_handler(generator):
     """设置 Windows 控制台关闭事件处理器"""
     def cleanup():
-        logging.info("Alpha Generator 正在关闭...")
+        logger.info("Alpha Generator 正在关闭...")
         if generator:
             try:
                 # 关闭线程池
                 generator.executor.shutdown(wait=False)
-                logging.info("线程池已关闭")
+                logger.info("线程池已关闭")
             except Exception as e:
-                logging.error(f"关闭线程池时出错: {e}")
+                logger.error(f"关闭线程池时出错: {e}")
+        # 停止 QueueListener
+        try:
+            queue_listener.stop()
+            logger.info("QueueListener 已停止")
+        except Exception as e:
+            pass
 
     def signal_handler(signum=None, frame=None):
-        logging.info("收到退出信号，正在关闭...")
+        logger.info("收到退出信号，正在关闭...")
         cleanup()
         sys.exit(0)
 
@@ -1448,11 +1475,11 @@ def setup_cleanup_handler(generator):
             ctrl_handler = CTRL_HANDLER_TYPE(console_ctrl_handler)
             result = ctypes.windll.kernel32.SetConsoleCtrlHandler(ctrl_handler, True)
             if result:
-                logging.info("已注册 Windows 控制台关闭事件处理器")
+                logger.info("已注册 Windows 控制台关闭事件处理器")
             else:
-                logging.warning("注册 Windows 控制台事件处理器失败")
+                logger.warning("注册 Windows 控制台事件处理器失败")
         except Exception as e:
-            logging.warning(f"无法注册 Windows 控制台事件处理器: {e}")
+            logger.warning(f"无法注册 Windows 控制台事件处理器: {e}")
 
     atexit.register(cleanup)
 
