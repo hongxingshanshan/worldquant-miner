@@ -6,13 +6,49 @@ import json
 import logging
 import requests
 from typing import List, Dict, Optional
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# 加载 .env 文件的辅助函数
+def _load_env_file(config_path: str = None):
+    """从多个可能的位置加载 .env 文件"""
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+
+    # 可能的 .env 文件位置
+    env_paths = []
+
+    # 1. 从配置文件所在目录
+    if config_path:
+        config_dir = Path(config_path).parent
+        if config_dir:
+            env_paths.append(config_dir / ".env")
+
+    # 2. 从脚本所在目录
+    env_paths.append(Path(__file__).parent / ".env")
+
+    # 3. 当前工作目录
+    env_paths.append(Path.cwd() / ".env")
+
+    # 尝试加载第一个存在的 .env 文件
+    for env_path in env_paths:
+        if env_path.exists():
+            load_dotenv(env_path)
+            return
+
+# 初始加载（模块导入时）
+_load_env_file()
 
 class LLMClient:
     """统一 LLM 客户端"""
 
     def __init__(self, config_path: str = "config.json"):
+        # 再次尝试从配置文件目录加载 .env
+        _load_env_file(config_path)
+
         self.config = self._load_config(config_path)
         # provider 放在顶层配置
         self.provider = self.config.get("provider", "ollama")

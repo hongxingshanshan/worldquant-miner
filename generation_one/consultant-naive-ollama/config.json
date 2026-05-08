@@ -1,4 +1,11 @@
 {
+    "provider": "online",
+    "llm": {
+        "api_key": "",
+        "base_url": "https://cmkey.cn",
+        "model": "glm-5.1",
+        "max_tokens": 4096
+    },
     "ollama": {
         "api_url": "http://localhost:11434",
         "default_model": "llama3:8b",
