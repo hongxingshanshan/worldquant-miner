@@ -671,7 +671,9 @@ def main():
                       help='Generator batch size (default: 10)')
     parser.add_argument('--generator-sleep-time', type=int, default=30,
                       help='Generator sleep time in seconds (default: 30)')
-    
+    parser.add_argument('--config', type=str, default='config.json',
+                      help='Path to config file (default: config.json)')
+
     args = parser.parse_args()
     
     try:

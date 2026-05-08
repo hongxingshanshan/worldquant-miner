@@ -1005,6 +1005,8 @@ def main():
                       help='Ollama model to use (default: llama3:8b)')
     parser.add_argument('--log-timeout', type=int, default=40,
                       help='Log inactivity timeout in seconds before reset (default: 300)')
+    parser.add_argument('--config', type=str, default='config.json',
+                      help='Path to config file (default: config.json)')
     
     args = parser.parse_args()
     
