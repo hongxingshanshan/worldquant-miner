@@ -87,3 +87,17 @@ simulation_errors.json
 # Fetch scripts (one-time use)
 **/fetch_community_*.py
 **/fetch_community_batch.py
+
+# Ruflo/Claude Flow runtime files
+.claude-flow/daemon.pid
+.claude-flow/daemon-state.json
+.claude-flow/metrics/
+.claude-flow/security/
+.claude-flow/swarm/
+.swarm/
+node_modules/
+package-lock.json
+package.json
+
+# Submitted alphas cache
+**/submitted_alphas_cache.json
