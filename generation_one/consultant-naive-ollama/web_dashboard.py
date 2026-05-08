@@ -369,11 +369,11 @@ class AlphaDashboard:
         """Trigger manual alpha expression mining."""
         try:
             result = subprocess.run([
-                "python", "alpha_orchestrator.py", 
+                "python", "alpha_orchestrator.py",
                 "--mode", "miner",
                 "--credentials", "./credential.txt"
-            ], capture_output=True, text=True, timeout=300)
-            
+            ], capture_output=True, text=True, timeout=1800)  # 30 分钟超时
+
             return {
                 "success": result.returncode == 0,
                 "output": result.stdout,
@@ -381,17 +381,17 @@ class AlphaDashboard:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
-    
+
     def trigger_submission(self) -> Dict:
         """Trigger manual alpha submission."""
         try:
             result = subprocess.run([
-                "python", "alpha_orchestrator.py", 
+                "python", "alpha_orchestrator.py",
                 "--mode", "submitter",
                 "--credentials", "./credential.txt",
                 "--batch-size", "3"
-            ], capture_output=True, text=True, timeout=600)
-            
+            ], capture_output=True, text=True, timeout=5400)  # 90 分钟超时
+
             return {
                 "success": result.returncode == 0,
                 "output": result.stdout,
@@ -399,17 +399,17 @@ class AlphaDashboard:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
-    
+
     def trigger_alpha_generation(self) -> Dict:
         """Trigger manual alpha generation."""
         try:
             result = subprocess.run([
-                "python", "alpha_orchestrator.py", 
+                "python", "alpha_orchestrator.py",
                 "--mode", "generator",
                 "--credentials", "./credential.txt",
                 "--batch-size", "1"
-            ], capture_output=True, text=True, timeout=300)
-            
+            ], capture_output=True, text=True, timeout=3600)  # 60 分钟超时
+
             return {
                 "success": result.returncode == 0,
                 "output": result.stdout,
