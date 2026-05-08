@@ -466,12 +466,12 @@ def get_ollama_info():
 def get_recent_logs():
     """Get recent logs from various log files."""
     log_files = [
-        'logs/alpha_orchestrator.log',
-        'logs/integrated_alpha_miner.log',
-        'logs/adaptive_alpha_miner.log',
-        'logs/alpha_generator_ollama.log'
+        'alpha_orchestrator.log',
+        'integrated_alpha_miner.log',
+        'adaptive_alpha_miner.log',
+        'alpha_generator_ollama.log'
     ]
-    
+
     recent_logs = []
     for log_file in log_files:
         if os.path.exists(log_file):
@@ -483,10 +483,10 @@ def get_recent_logs():
                     recent_logs.extend([f"[{log_file}] {line.strip()}" for line in recent_lines])
             except Exception as e:
                 recent_logs.append(f"[{log_file}] Error reading log: {str(e)}")
-    
+
     # Sort by timestamp if available
     recent_logs.sort(reverse=True)
-    
+
     # Return last 20 log entries
     return '\n'.join(recent_logs[-20:]) if recent_logs else "No recent logs available"
 
