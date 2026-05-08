@@ -1,16 +1,35 @@
 import requests
 import json
 import logging
+import logging.handlers
 import time
 import os
+import queue
 from requests.auth import HTTPBasicAuth
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import argparse
 from datetime import datetime, timedelta
 
-# Configure logger
-logger = logging.getLogger(__name__)
+# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
+log_queue = queue.Queue(-1)
+queue_handler = logging.handlers.QueueHandler(log_queue)
+
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+file_handler = logging.FileHandler('improved_alpha_submitter.log', mode='a', encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
+queue_listener.start()
+
+logger = logging.getLogger('improved_alpha_submitter')
+logger.setLevel(logging.INFO)
+logger.addHandler(queue_handler)
+logger.propagate = False
 
 class ImprovedAlphaSubmitter:
     def __init__(self, credentials_path: str):
@@ -491,17 +510,10 @@ def main():
                       help='Use hopeful_alphas.json file instead of fetching from API')
     
     args = parser.parse_args()
-    
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('improved_alpha_submitter.log')
-        ]
-    )
-    
+
+    # 设置日志级别
+    logger.setLevel(getattr(logging, args.log_level))
+
     if not os.path.exists(args.credentials):
         logger.error(f"Credentials file not found: {args.credentials}")
         return 1
@@ -554,9 +566,11 @@ def main():
             
     except KeyboardInterrupt:
         logger.info("Received shutdown signal, exiting gracefully...")
+        queue_listener.stop()
         return 0
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
+        queue_listener.stop()
         return 1
 
 if __name__ == "__main__":

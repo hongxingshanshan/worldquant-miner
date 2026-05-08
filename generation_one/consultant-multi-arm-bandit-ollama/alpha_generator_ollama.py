@@ -8,6 +8,8 @@ from typing import List, Dict
 import time
 import re
 import logging
+import logging.handlers
+import queue
 from queue import Queue
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,8 +22,20 @@ try:
 except ImportError:
     CONFIG_AVAILABLE = False
 
+# 使用 QueueHandler 和 QueueListener 模式避免多线程 logging 死锁
+log_queue = queue.Queue(-1)
+queue_handler = logging.handlers.QueueHandler(log_queue)
+stream_handler = logging.StreamHandler()
+file_handler = logging.FileHandler('alpha_generator_ollama.log', mode='a', encoding='utf-8')
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
+queue_listener.start()
+
 # Configure logger
 logger = logging.getLogger(__name__)
+logger.addHandler(queue_handler)
+logger.propagate = False
 
 class RetryQueue:
     def __init__(self, generator, max_retries=3, retry_delay=60):
@@ -1148,17 +1162,10 @@ def main():
                       help='Path to configuration file (default: config.json)')
 
     args = parser.parse_args()
-    
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),  # Log to console
-            logging.FileHandler('alpha_generator_ollama.log')  # Also log to file
-        ]
-    )
-    
+
+    # 设置日志级别
+    logger.setLevel(getattr(logging, args.log_level))
+
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -1241,13 +1248,15 @@ def main():
                 continue
         
     except KeyboardInterrupt:
-        logging.info("\nStopping alpha mining...")
-        logging.info(f"Total batches processed: {batch_number - 1}")
-        logging.info(f"Total successful alphas: {total_successful}")
+        logger.info("\nStopping alpha mining...")
+        logger.info(f"Total batches processed: {batch_number - 1}")
+        logger.info(f"Total successful alphas: {total_successful}")
+        queue_listener.stop()
         return 0
-        
+
     except Exception as e:
-        logging.error(f"Fatal error: {str(e)}")
+        logger.error(f"Fatal error: {str(e)}")
+        queue_listener.stop()
         return 1
 
 if __name__ == "__main__":

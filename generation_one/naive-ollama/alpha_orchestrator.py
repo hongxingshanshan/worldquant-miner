@@ -4,6 +4,7 @@ import json
 import os
 import time
 import logging
+import logging.handlers
 import schedule
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -24,8 +25,6 @@ try:
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
-    logger_warning = logging.getLogger(__name__)
-    logger_warning.warning("config_manager 模块未找到，使用默认配置")
 
 # 导入统一 LLM 客户端
 try:
@@ -34,16 +33,34 @@ try:
 except ImportError:
     LLM_CLIENT_AVAILABLE = False
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('alpha_orchestrator.log')
-    ]
-)
-logger = logging.getLogger(__name__)
+# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
+# 创建日志队列
+log_queue = queue.Queue(-1)  # 无限大小
+
+# 创建 QueueHandler
+queue_handler = logging.handlers.QueueHandler(log_queue)
+
+# 创建实际的 handlers
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+file_handler = logging.FileHandler('alpha_orchestrator.log', mode='a', encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# 创建 QueueListener（在主线程启动）
+queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
+queue_listener.start()
+
+# 创建 logger 并添加 QueueHandler
+logger = logging.getLogger('alpha_orchestrator')
+logger.setLevel(logging.INFO)
+logger.addHandler(queue_handler)
+logger.propagate = False  # 不传播到 root logger
+
+if not CONFIG_AVAILABLE:
+    logger.warning("config_manager 模块未找到，使用默认配置")
 
 @dataclass
 class ModelInfo:
@@ -1039,8 +1056,11 @@ def main():
 
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        queue_listener.stop()
         return 1
 
+    # 停止 QueueListener
+    queue_listener.stop()
     return 0
 
 if __name__ == "__main__":

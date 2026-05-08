@@ -4,6 +4,7 @@ import json
 import os
 import time
 import logging
+import logging.handlers
 import schedule
 from datetime import datetime, timedelta
 from typing import List, Dict
@@ -18,16 +19,18 @@ import signal
 import atexit
 import ctypes
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('alpha_orchestrator.log')
-    ]
-)
+# 使用 QueueHandler 和 QueueListener 模式避免多线程 logging 死锁
+log_queue = queue.Queue(-1)
+queue_handler = logging.handlers.QueueHandler(log_queue)
+stream_handler = logging.StreamHandler()
+file_handler = logging.FileHandler('alpha_orchestrator.log', mode='a', encoding='utf-8')
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
+queue_listener.start()
 logger = logging.getLogger(__name__)
+logger.addHandler(queue_handler)
+logger.propagate = False
 
 @dataclass
 class ModelInfo:
@@ -1054,8 +1057,10 @@ def main():
             
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        queue_listener.stop()
         return 1
-    
+
+    queue_listener.stop()
     return 0
 
 if __name__ == "__main__":

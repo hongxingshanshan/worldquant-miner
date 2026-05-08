@@ -4,9 +4,11 @@ import os
 import time
 import subprocess
 import threading
+import queue
 from datetime import datetime, timedelta
 import requests
 import logging
+import logging.handlers
 from typing import Dict, List, Optional
 import sys
 import ctypes
@@ -17,9 +19,21 @@ from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
+log_queue = queue.Queue(-1)
+queue_handler = logging.handlers.QueueHandler(log_queue)
+
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+queue_listener = logging.handlers.QueueListener(log_queue, stream_handler)
+queue_listener.start()
+
+logger = logging.getLogger('web_dashboard')
+logger.setLevel(logging.INFO)
+logger.addHandler(queue_handler)
+logger.propagate = False
 
 class AlphaDashboard:
     def __init__(self):
