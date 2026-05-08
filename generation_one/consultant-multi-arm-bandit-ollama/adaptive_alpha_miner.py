@@ -23,16 +23,21 @@ try:
 except ImportError:
     CONFIG_AVAILABLE = False
 
-# Configure logging
+# Configure logging with immediate flush
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('adaptive_alpha_miner.log')
+        logging.FileHandler('adaptive_alpha_miner.log', mode='a', encoding='utf-8')
     ]
 )
 logger = logging.getLogger(__name__)
+
+# 强制刷新日志
+for handler in logger.handlers:
+    if hasattr(handler, 'flush'):
+        handler.flush()
 
 @dataclass
 class SimulationSettings:
@@ -394,9 +399,13 @@ class AdaptiveAlphaMiner:
         return region_to_universe.get(region, "TOP3000")
     
     def _get_data_fields_for_region(self, temp_generator, delay: int = 1) -> List[Dict]:
-        """Get data fields specific to the selected region with specified delay."""
+        """Get data fields specific to the selected region with specified delay.
+
+        添加请求间隔以避免 API 限流
+        """
         all_fields = []
-        
+        api_request_delay = 1.0  # 每次请求间隔 1 秒，避免限流
+
         base_params = {
             'delay': delay,
             'instrumentType': 'EQUITY',
@@ -404,10 +413,10 @@ class AdaptiveAlphaMiner:
             'region': self.selected_region,
             'universe': self.selected_universe
         }
-        
+
         try:
-            logger.info(f"Requesting data fields for region {self.selected_region} with universe {self.selected_universe} and delay={delay}")
-            
+            logger.info(f"[数据字段获取] 开始获取 region={self.selected_region}, universe={self.selected_universe}, delay={delay}")
+
             # First, get available datasets for this region
             datasets_params = {
                 'category': 'fundamental',
@@ -417,72 +426,78 @@ class AdaptiveAlphaMiner:
                 'universe': self.selected_universe,
                 'limit': 50
             }
-            
-            logger.info(f"Getting available datasets for region {self.selected_region}")
+
+            logger.info(f"[数据字段获取] 步骤 1/2: 获取可用数据集列表...")
+            time.sleep(api_request_delay)  # 请求前等待
             datasets_response = self.sess.get('https://api.worldquantbrain.com/data-sets', params=datasets_params)
-            
+
             if datasets_response.status_code == 200:
                 datasets_data = datasets_response.json()
                 available_datasets = datasets_data.get('results', [])
-                logger.info(f"Found {len(available_datasets)} available datasets for region {self.selected_region}")
-                
+                logger.info(f"[数据字段获取] ✓ 找到 {len(available_datasets)} 个可用数据集")
+
                 # Extract dataset IDs
                 dataset_ids = [ds.get('id') for ds in available_datasets if ds.get('id')]
-                logger.info(f"Available dataset IDs: {dataset_ids}")
-                
+                logger.info(f"[数据字段获取] 数据集 ID: {dataset_ids}")
+
                 # If no datasets found, fall back to default datasets
                 if not dataset_ids:
-                    logger.warning(f"No datasets found for region {self.selected_region}, using default datasets")
+                    logger.warning(f"[数据字段获取] ⚠ 未找到数据集，使用默认数据集")
                     dataset_ids = ['fundamental6', 'fundamental2', 'analyst4', 'model16', 'model51', 'news12']
             else:
-                logger.warning(f"Failed to get datasets for region {self.selected_region}: {datasets_response.text[:500]}")
+                logger.warning(f"[数据字段获取] ⚠ 获取数据集失败: {datasets_response.text[:200]}")
                 # Fall back to default datasets
                 dataset_ids = ['fundamental6', 'fundamental2', 'analyst4', 'model16', 'model51', 'news12']
-            
+
             # Now fetch fields from available datasets
-            for dataset in dataset_ids:
+            total_datasets = len(dataset_ids)
+            logger.info(f"[数据字段获取] 步骤 2/2: 遍历 {total_datasets} 个数据集获取字段...")
+
+            for idx, dataset in enumerate(dataset_ids, 1):
+                logger.info(f"[数据字段获取]   [{idx}/{total_datasets}] 正在处理数据集: {dataset}")
+
                 # First get the count
                 params = base_params.copy()
                 params['dataset.id'] = dataset
                 params['limit'] = 1  # Just to get count efficiently
-                
-                logger.info(f"Getting field count for dataset: {dataset}")
+
+                time.sleep(api_request_delay)  # 请求前等待
                 count_response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params)
-                
+
                 if count_response.status_code == 200:
                     count_data = count_response.json()
                     total_fields = count_data.get('count', 0)
-                    logger.info(f"Total fields in {dataset}: {total_fields}")
-                    
+                    logger.info(f"[数据字段获取]     字段总数: {total_fields}")
+
                     if total_fields > 0:
                         # Generate random offset
                         max_offset = max(0, total_fields - base_params['limit'])
                         random_offset = random.randint(0, max_offset)
-                        
+
                         # Fetch random subset
                         params['offset'] = random_offset
                         params['limit'] = min(20, total_fields)  # Don't exceed total fields
-                        
-                        logger.info(f"Fetching fields for {dataset} with offset {random_offset}")
+
+                        time.sleep(api_request_delay)  # 请求前等待
                         response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params)
-                        
+
                         if response.status_code == 200:
                             data = response.json()
                             fields = data.get('results', [])
-                            logger.info(f"Found {len(fields)} fields in {dataset}")
+                            logger.info(f"[数据字段获取]     ✓ 成功获取 {len(fields)} 个字段")
                             all_fields.extend(fields)
                         else:
-                            logger.warning(f"Failed to fetch fields for {dataset}: {response.text[:500]}")
+                            logger.warning(f"[数据字段获取]     ⚠ 获取字段失败: {response.text[:200]}")
                 else:
-                    logger.warning(f"Failed to get count for {dataset}: {count_response.text[:500]}")
-            
+                    logger.warning(f"[数据字段获取]     ⚠ 获取字段数量失败: {count_response.text[:200]}")
+
             # Remove duplicates if any
             unique_fields = {field['id']: field for field in all_fields}.values()
-            logger.info(f"Total unique fields found for region {self.selected_region} with delay={delay}: {len(unique_fields)}")
+            logger.info(f"[数据字段获取] ✓ 完成! 共获取 {len(unique_fields)} 个唯一字段 (region={self.selected_region}, delay={delay})")
             return list(unique_fields)
-            
+
         except Exception as e:
-            logger.error(f"Failed to fetch data fields for region {self.selected_region} with delay={delay}: {e}")
+            logger.error(f"[数据字段获取] ✗ 获取字段失败: {e}")
             return []
     
     def _initialize_settings_variations(self):
@@ -601,20 +616,30 @@ class AdaptiveAlphaMiner:
             std_values = [2, 3, 4, 5, 6]
             
             expressions = []
-            
+
+            logger.info(f"[Alpha生成] 开始生成 {count} 个 Alpha 表达式...")
+
             for i in range(count):
+                logger.info(f"[Alpha生成] 迭代 {i+1}/{count}")
+                for handler in logger.handlers:
+                    handler.flush()
+
                 # Randomly select components from the actual API data
                 selected_fields = random.sample(field_info, min(3, len(field_info)))
                 selected_operators = random.sample(operator_info, min(5, len(operator_info)))
                 selected_wrappers = random.sample(wrappers, min(2, len(wrappers)))
                 lookback = random.choice(lookback_periods)
                 std_val = random.choice(std_values)
-                
+
+                logger.info(f"[Alpha生成]   已选择 {len(selected_fields)} 个字段, {len(selected_operators)} 个操作符")
+                for handler in logger.handlers:
+                    handler.flush()
+
                 # Format fields and operators with descriptions
                 fields_formatted = [f"{field_id} ({desc})" for field_id, desc in selected_fields]
                 operators_formatted = [f"{op_name} ({desc})" for op_name, desc in selected_operators]
                 wrappers_formatted = [f"{wrap_name} ({desc})" for wrap_name, desc in selected_wrappers]
-                
+
                 # Create prompt for Ollama
                 prompt = f"""Generate 3 WorldQuant Brain alpha expressions. Return ONLY valid JSON.
 
@@ -776,7 +801,7 @@ JSON:"""
                     logger.info(f"Ollama failed, using fallback expression {i+1}: {fallback_expr}")
             
             return expressions[:count]
-            
+
         except Exception as e:
             logger.error(f"Error generating alpha expressions with Ollama: {e}")
             # Fallback to simple expressions
@@ -787,14 +812,19 @@ JSON:"""
                 fallback_expr = f"{operator}({field}, 60)"
                 fallback_expressions.append(fallback_expr)
             return fallback_expressions
+
+        finally:
+            logger.info(f"[Alpha生成] 完成, 共生成 {len(expressions)} 个表达式")
     
     def _call_ollama(self, prompt: str) -> Optional[str]:
         """Call Ollama API to generate alpha expression with retry logic."""
         import requests
-        
+
         ollama_url = getattr(self, 'ollama_url', 'http://localhost:11434')
-        model = getattr(self, 'ollama_model', 'deepseek-r1:8b')
-        
+        model = getattr(self, 'ollama_model', 'llama3:8b')  # 默认使用 llama3:8b
+
+        logger.info(f"[Ollama调用] 准备调用模型: {model}")
+
         payload = {
             "model": model,
             "prompt": prompt,
@@ -806,46 +836,49 @@ JSON:"""
                 "num_predict": 2500,  # Increased to ensure complete response
             }
         }
-        
+
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                logger.info(f"Ollama API call attempt {attempt + 1}/{max_retries}")
-                response = requests.post(f"{ollama_url}/api/generate", json=payload, timeout=3000)
-                
+                logger.info(f"[Ollama调用] 尝试 {attempt + 1}/{max_retries}, 发送请求...")
+                response = requests.post(f"{ollama_url}/api/generate", json=payload, timeout=300)
+
+                logger.info(f"[Ollama调用] 收到响应, 状态码: {response.status_code}")
+
                 if response.status_code == 200:
                     result = response.json()
                     response_text = result.get('response', '').strip()
-                    
+
                     # Check if response is too short (likely incomplete)
                     if len(response_text) < 10:
-                        logger.warning(f"Ollama response too short: '{response_text}'")
+                        logger.warning(f"[Ollama调用] 响应过短: '{response_text[:100]}...'")
                         if attempt < max_retries - 1:
                             time.sleep(2 ** attempt)
                             continue
                         return None
-                    
+
+                    logger.info(f"[Ollama调用] 成功, 响应长度: {len(response_text)} 字符")
                     return response_text
                 else:
-                    logger.error(f"Ollama API error: {response.status_code} - {response.text}")
+                    logger.error(f"[Ollama调用] API 错误: {response.status_code} - {response.text[:200]}")
                     if attempt < max_retries - 1:
                         time.sleep(10)  # Wait before retry
                         continue
                     return None
-                    
+
             except requests.exceptions.Timeout:
-                logger.warning(f"Ollama API timeout on attempt {attempt + 1}")
+                logger.warning(f"[Ollama调用] 超时 (尝试 {attempt + 1}/{max_retries})")
                 if attempt < max_retries - 1:
                     time.sleep(30)  # Longer wait for timeout
                     continue
                 return None
             except Exception as e:
-                logger.error(f"Error calling Ollama API (attempt {attempt + 1}): {e}")
+                logger.error(f"[Ollama调用] 异常 (尝试 {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(10)
                     continue
                 return None
-        
+
         return None
     
     def calculate_reward(self, result: AlphaResult) -> float:

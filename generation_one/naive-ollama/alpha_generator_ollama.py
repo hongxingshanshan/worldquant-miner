@@ -139,10 +139,14 @@ class AlphaGenerator:
             logging.warning(f"VRAM cleanup failed: {e}")
         
     def get_data_fields(self) -> List[Dict]:
-        """Fetch available data fields from WorldQuant Brain across multiple datasets with random sampling."""
+        """Fetch available data fields from WorldQuant Brain across multiple datasets with random sampling.
+
+        添加请求间隔以避免 API 限流
+        """
         datasets = ['fundamental6', 'fundamental2', 'analyst4', 'model16', 'model51', 'news12']
         all_fields = []
-        
+        api_request_delay = 1.0  # 每次请求间隔 1 秒，避免限流
+
         base_params = {
             'delay': 1,
             'instrumentType': 'EQUITY',
@@ -150,50 +154,54 @@ class AlphaGenerator:
             'region': 'USA',
             'universe': 'TOP3000'
         }
-        
+
         try:
-            print("Requesting data fields from multiple datasets...")
-            for dataset in datasets:
+            total_datasets = len(datasets)
+            print(f"[数据字段获取] 开始获取数据字段，共 {total_datasets} 个数据集...")
+
+            for idx, dataset in enumerate(datasets, 1):
+                print(f"[数据字段获取]   [{idx}/{total_datasets}] 正在处理数据集: {dataset}")
+
                 # First get the count
                 params = base_params.copy()
                 params['dataset.id'] = dataset
                 params['limit'] = 1  # Just to get count efficiently
-                
-                print(f"Getting field count for dataset: {dataset}")
+
+                time.sleep(api_request_delay)  # 请求前等待
                 count_response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params)
-                
+
                 if count_response.status_code == 200:
                     count_data = count_response.json()
                     total_fields = count_data.get('count', 0)
-                    print(f"Total fields in {dataset}: {total_fields}")
-                    
+                    print(f"[数据字段获取]     字段总数: {total_fields}")
+
                     if total_fields > 0:
                         # Generate random offset
                         max_offset = max(0, total_fields - base_params['limit'])
                         random_offset = random.randint(0, max_offset)
-                        
+
                         # Fetch random subset
                         params['offset'] = random_offset
                         params['limit'] = min(20, total_fields)  # Don't exceed total fields
-                        
-                        print(f"Fetching fields for {dataset} with offset {random_offset}")
+
+                        time.sleep(api_request_delay)  # 请求前等待
                         response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params)
-                        
+
                         if response.status_code == 200:
                             data = response.json()
                             fields = data.get('results', [])
-                            print(f"Found {len(fields)} fields in {dataset}")
+                            print(f"[数据字段获取]     ✓ 成功获取 {len(fields)} 个字段")
                             all_fields.extend(fields)
                         else:
-                            print(f"Failed to fetch fields for {dataset}: {response.text[:500]}")
+                            print(f"[数据字段获取]     ⚠ 获取字段失败: {response.text[:200]}")
                 else:
-                    print(f"Failed to get count for {dataset}: {count_response.text[:500]}")
-            
+                    print(f"[数据字段获取]     ⚠ 获取字段数量失败: {count_response.text[:200]}")
+
             # Remove duplicates if any
             unique_fields = {field['id']: field for field in all_fields}.values()
-            print(f"Total unique fields found: {len(unique_fields)}")
+            print(f"[数据字段获取] ✓ 完成! 共获取 {len(unique_fields)} 个唯一字段")
             return list(unique_fields)
-            
+
         except Exception as e:
             logger.error(f"Failed to fetch data fields: {e}")
             return []

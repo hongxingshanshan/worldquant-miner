@@ -135,17 +135,26 @@ class AlphaGenerator:
             logging.warning(f"VRAM cleanup failed: {e}")
         
     def get_data_fields(self, region: str = "USA", universe: str = "TOP3000") -> List[Dict]:
-        """Fetch available data fields from WorldQuant Brain across multiple datasets with random sampling."""
+        """Fetch available data fields from WorldQuant Brain across multiple datasets with random sampling.
+
+        添加请求间隔以避免 API 限流
+        """
         all_fields = []
-        
+        api_request_delay = 1.0  # 每次请求间隔 1 秒，避免限流
+
         # Region-specific delay availability
         # ASI and CHN regions only support delay=1 for EQUITY
         if region in ["ASI", "CHN"]:
             delays = [1]  # Only delay 1 for ASI/CHN
         else:
             delays = [0, 1]  # Both delays for other regions
-        
-        for delay in delays:
+
+        total_delays = len(delays)
+        print(f"[数据字段获取] 开始获取数据字段 (region={region}, universe={universe})")
+
+        for delay_idx, delay in enumerate(delays, 1):
+            print(f"[数据字段获取] 处理 delay={delay} ({delay_idx}/{total_delays})")
+
             base_params = {
                 'delay': delay,
                 'instrumentType': 'EQUITY',
@@ -153,7 +162,7 @@ class AlphaGenerator:
                 'region': region,
                 'universe': universe
             }
-            
+
             try:
                 # First, get available datasets for this region
                 datasets_params = {
@@ -164,72 +173,78 @@ class AlphaGenerator:
                     'universe': universe,
                     'limit': 50
                 }
-                
-                print(f"Getting available datasets for region {region} with delay {delay}")
+
+                print(f"[数据字段获取]   步骤 1: 获取可用数据集列表...")
+                time.sleep(api_request_delay)  # 请求前等待
                 datasets_response = self.sess.get('https://api.worldquantbrain.com/data-sets', params=datasets_params)
-                
+
                 if datasets_response.status_code == 200:
                     datasets_data = datasets_response.json()
                     available_datasets = datasets_data.get('results', [])
-                    print(f"Found {len(available_datasets)} available datasets for region {region} with delay {delay}")
-                    
+                    print(f"[数据字段获取]   ✓ 找到 {len(available_datasets)} 个可用数据集")
+
                     # Extract dataset IDs
                     dataset_ids = [ds.get('id') for ds in available_datasets if ds.get('id')]
-                    print(f"Available dataset IDs: {dataset_ids}")
-                    
+                    print(f"[数据字段获取]   数据集 ID: {dataset_ids}")
+
                     # If no datasets found, fall back to default datasets
                     if not dataset_ids:
-                        print(f"No datasets found for region {region} with delay {delay}, using default datasets")
+                        print(f"[数据字段获取]   ⚠ 未找到数据集，使用默认数据集")
                         dataset_ids = ['fundamental6', 'fundamental2', 'analyst4', 'model16', 'model51', 'news12']
                 else:
-                    print(f"Failed to get datasets for region {region} with delay {delay}: {datasets_response.text[:500]}")
+                    print(f"[数据字段获取]   ⚠ 获取数据集失败: {datasets_response.text[:200]}")
                     # Fall back to default datasets
                     dataset_ids = ['fundamental6', 'fundamental2', 'analyst4', 'model16', 'model51', 'news12']
-                
-                print(f"Requesting data fields from available datasets for delay {delay}...")
-                for dataset in dataset_ids:
+
+                # Now fetch fields from available datasets
+                total_datasets = len(dataset_ids)
+                print(f"[数据字段获取]   步骤 2: 遍历 {total_datasets} 个数据集获取字段...")
+
+                for ds_idx, dataset in enumerate(dataset_ids, 1):
+                    print(f"[数据字段获取]     [{ds_idx}/{total_datasets}] 正在处理数据集: {dataset}")
+
                     # First get the count
                     params = base_params.copy()
                     params['dataset.id'] = dataset
                     params['limit'] = 1  # Just to get count efficiently
-                    
-                    print(f"Getting field count for dataset: {dataset}")
+
+                    time.sleep(api_request_delay)  # 请求前等待
                     count_response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params)
-                    
+
                     if count_response.status_code == 200:
                         count_data = count_response.json()
                         total_fields = count_data.get('count', 0)
-                        print(f"Total fields in {dataset}: {total_fields}")
-                        
+                        print(f"[数据字段获取]       字段总数: {total_fields}")
+
                         if total_fields > 0:
                             # Generate random offset
                             max_offset = max(0, total_fields - base_params['limit'])
                             random_offset = random.randint(0, max_offset)
-                            
+
                             # Fetch random subset
                             params['offset'] = random_offset
                             params['limit'] = min(20, total_fields)  # Don't exceed total fields
-                            
-                            print(f"Fetching fields for {dataset} with offset {random_offset}")
+
+                            time.sleep(api_request_delay)  # 请求前等待
                             response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params)
-                            
+
                             if response.status_code == 200:
                                 data = response.json()
                                 fields = data.get('results', [])
-                                print(f"Found {len(fields)} fields in {dataset}")
+                                print(f"[数据字段获取]       ✓ 成功获取 {len(fields)} 个字段")
                                 all_fields.extend(fields)
                             else:
-                                print(f"Failed to fetch fields for {dataset}: {response.text[:500]}")
+                                print(f"[数据字段获取]       ⚠ 获取字段失败: {response.text[:200]}")
                     else:
-                        print(f"Failed to get count for {dataset}: {count_response.text[:500]}")
-                        
+                        print(f"[数据字段获取]       ⚠ 获取字段数量失败: {count_response.text[:200]}")
+
             except Exception as e:
                 logger.error(f"Failed to fetch data fields for delay {delay}: {e}")
                 continue
-        
+
         # Remove duplicates if any
         unique_fields = {field['id']: field for field in all_fields}.values()
-        print(f"Total unique fields found: {len(unique_fields)}")
+        print(f"[数据字段获取] ✓ 完成! 共获取 {len(unique_fields)} 个唯一字段")
         return list(unique_fields)
 
     def get_operators(self) -> List[Dict]:
@@ -479,7 +494,10 @@ Generate 100 expressions:"""
         except Exception as e:
             if "token limit" in str(e).lower():
                 self._hit_token_limit = True  # Mark that we hit token limit
+            import traceback
+            error_trace = traceback.format_exc()
             logging.error(f"Error generating alpha ideas: {str(e)}")
+            logging.error(f"Full traceback:\n{error_trace}")
             return []
     
     def _handle_ollama_error(self, error_type: str):
@@ -787,60 +805,67 @@ Generate 100 expressions:"""
     def multi_simulate(self, alpha_pools: list, neut: str = "INDUSTRY", region: str = "USA", universe: str = "TOP3000", start: int = 0):
         """Run multiple alpha simulations in parallel using multi-simulate functionality."""
         logging.info(f"Starting multi-simulate for {len(alpha_pools)} pools")
-        
+
         for x, pool in enumerate(alpha_pools):
             if x < start:
                 continue
-                
+
             progress_urls = []
+            alpha_expressions = []  # Track alpha expressions
             logging.info(f"Processing pool {x+1}/{len(alpha_pools)}")
-            
+
             for y, task in enumerate(pool):
                 sim_data_list = self.generate_sim_data(task, region, universe, neut)
                 logging.info(f"Generated simulation data for task {y+1}/{len(pool)}")
-                
+
                 try:
                     # If only one simulation, send it directly without wrapping array
                     if len(sim_data_list) == 1:
-                        simulation_response = self.sess.post('https://api.worldquantbrain.com/simulations', 
+                        simulation_response = self.sess.post('https://api.worldquantbrain.com/simulations',
                                                          json=sim_data_list[0])
                     else:
-                        simulation_response = self.sess.post('https://api.worldquantbrain.com/simulations', 
+                        simulation_response = self.sess.post('https://api.worldquantbrain.com/simulations',
                                                          json=sim_data_list)
-                    
+
                     if simulation_response.status_code == 401:
                         logging.info("Session expired, re-authenticating...")
                         self.setup_auth(self.credentials_path)
                         if len(sim_data_list) == 1:
-                            simulation_response = self.sess.post('https://api.worldquantbrain.com/simulations', 
+                            simulation_response = self.sess.post('https://api.worldquantbrain.com/simulations',
                                                             json=sim_data_list[0])
                         else:
-                            simulation_response = self.sess.post('https://api.worldquantbrain.com/simulations', 
+                            simulation_response = self.sess.post('https://api.worldquantbrain.com/simulations',
                                                             json=sim_data_list)
-                    
+
                     if simulation_response.status_code != 201:
                         logging.error(f"Simulation API error: {simulation_response.text}")
                         continue
-                        
+
                     simulation_progress_url = simulation_response.headers.get('Location')
                     if not simulation_progress_url:
                         logging.error("No Location header in response")
                         continue
-                        
+
                     progress_urls.append(simulation_progress_url)
+                    # Extract alpha expression from task (task is (alpha_expr, decay))
+                    alpha_expr = task[0] if isinstance(task, tuple) else str(task)
+                    alpha_expressions.append(alpha_expr)
                     logging.info(f"Posted simulation for task {y+1}, got progress URL: {simulation_progress_url}")
-                    
+
                 except Exception as e:
                     logging.error(f"Error posting simulation: {str(e)}")
                     sleep(600)
                     self.setup_auth(self.credentials_path)
                     continue
 
-            self._monitor_progress(progress_urls)
+            self._monitor_progress(progress_urls, alpha_expressions)
             logging.info(f"Pool {x+1} simulations completed")
 
-    def _monitor_progress(self, progress_urls: list):
-        """Monitor simulation progress."""
+    def _monitor_progress(self, progress_urls: list, alpha_expressions: list = None):
+        """Monitor simulation progress and save results."""
+        if alpha_expressions is None:
+            alpha_expressions = []
+
         for j, progress in enumerate(progress_urls):
             try:
                 while True:
@@ -850,9 +875,36 @@ Generate 100 expressions:"""
                         break
                     sleep(float(retry_after))
 
-                status = simulation_progress.json().get("status")
+                sim_result = simulation_progress.json()
+                status = sim_result.get("status")
                 logging.info(f"Task {j+1} status: {status}")
-                if status != "COMPLETE":
+
+                if status == "COMPLETE":
+                    # Save result to self.results
+                    alpha_id = sim_result.get("alpha")
+                    if alpha_id:
+                        try:
+                            alpha_resp = self.sess.get(f'https://api.worldquantbrain.com/alphas/{alpha_id}')
+                            if alpha_resp.status_code == 200:
+                                alpha_data = alpha_resp.json()
+                                fitness = alpha_data.get("is", {}).get("fitness")
+                                logging.info(f"Alpha {alpha_id} completed with fitness: {fitness}")
+
+                                # Use tracked alpha expression or extract from simulation
+                                alpha_expr = alpha_expressions[j] if j < len(alpha_expressions) else sim_result.get("regular", {}).get("code", "unknown")
+
+                                self.results.append({
+                                    "alpha": alpha_expr,
+                                    "result": sim_result,
+                                    "alpha_data": alpha_data
+                                })
+
+                                if fitness is not None and fitness > 0.5:
+                                    logging.info(f"Found promising alpha! Fitness: {fitness}")
+                                    self.log_hopeful_alpha(alpha_expr, alpha_data)
+                        except Exception as e:
+                            logging.error(f"Error fetching alpha data: {str(e)}")
+                elif status != "COMPLETE":
                     logging.warning(f"Task not complete: {progress}")
 
             except Exception as e:

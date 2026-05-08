@@ -66,3 +66,10 @@ build/
 QUANTAXIS
 hopeful_alphas.json*
 **/hopeful_alphas.json*
+
+# Runtime state files
+**/model_fleet_state.json
+**/adaptive_miner_state.json
+
+# MCP tools
+.playwright-mcp/

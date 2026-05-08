@@ -158,7 +158,7 @@ class IntegratedAlphaMiner:
                 '--sleep-time', str(self.config.generator_sleep_time),
                 '--ollama-url', self.config.ollama_url,
                 '--ollama-model', self.config.ollama_model,
-                '--multi-simulate', 'true',
+                '--multi-simulate', 'false',
                 '--batch-size-sim', '10',
                 '--concurrent-batches', '10'
             ]

@@ -403,23 +403,8 @@ def get_orchestrator_status():
         return False
 
 def get_mining_stats():
-    """Get mining statistics from orchestrator state."""
-    try:
-        if os.path.exists('orchestrator_state.json'):
-            with open('orchestrator_state.json', 'r') as f:
-                state = json.load(f)
-                return {
-                    'total_adaptive_alphas': state.get('total_adaptive_alphas', 0),
-                    'total_generator_alphas': state.get('total_generator_alphas', 0),
-                    'best_sharpe': state.get('best_sharpe', 0),
-                    'best_fitness': state.get('best_fitness', 0),
-                    'current_cycle': state.get('current_cycle', 0),
-                    'total_cycles': state.get('total_cycles', 0)
-                }
-    except Exception as e:
-        pass
-
-    return {
+    """Get mining statistics from log files and results files."""
+    stats = {
         'total_adaptive_alphas': 0,
         'total_generator_alphas': 0,
         'best_sharpe': 0,
@@ -427,6 +412,66 @@ def get_mining_stats():
         'current_cycle': 0,
         'total_cycles': 0
     }
+
+    # 从日志文件读取总成功 alpha 数量
+    try:
+        import re
+        log_file = 'alpha_generator_ollama.log'
+        if os.path.exists(log_file):
+            with open(log_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # 查找最后一个 "Total successful alphas: XXX"
+                matches = re.findall(r'Total successful alphas: (\d+)', content)
+                if matches:
+                    stats['total_generator_alphas'] = int(matches[-1])
+    except Exception as e:
+        pass
+
+    # 从 mined_expressions.json 读取已挖掘的 alpha 数量
+    try:
+        if os.path.exists('mined_expressions.json'):
+            with open('mined_expressions.json', 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    # 如果日志统计为 0,使用文件统计
+                    if stats['total_generator_alphas'] == 0:
+                        stats['total_generator_alphas'] = len(data)
+    except Exception as e:
+        pass
+
+    # 从 results 目录读取模拟结果
+    try:
+        results_dir = 'results'
+        if os.path.exists(results_dir):
+            best_sharpe = 0
+            best_fitness = 0
+            total_adaptive = 0
+
+            for filename in os.listdir(results_dir):
+                if filename.endswith('.json'):
+                    try:
+                        with open(os.path.join(results_dir, filename), 'r', encoding='utf-8') as f:
+                            result_data = json.load(f)
+                            if isinstance(result_data, list):
+                                total_adaptive += len(result_data)
+                                for item in result_data:
+                                    if isinstance(item, dict):
+                                        sharpe = item.get('sharpe', 0)
+                                        fitness = item.get('fitness', 0)
+                                        if sharpe and sharpe > best_sharpe:
+                                            best_sharpe = sharpe
+                                        if fitness and fitness > best_fitness:
+                                            best_fitness = fitness
+                    except:
+                        pass
+
+            stats['total_adaptive_alphas'] = total_adaptive
+            stats['best_sharpe'] = round(best_sharpe, 3) if best_sharpe > 0 else 0
+            stats['best_fitness'] = round(best_fitness, 3) if best_fitness > 0 else 0
+    except Exception as e:
+        pass
+
+    return stats
 
 def get_ollama_info():
     """Get Ollama model information."""
@@ -464,7 +509,10 @@ def get_ollama_info():
     }
 
 def get_recent_logs():
-    """Get recent logs from various log files."""
+    """Get recent logs from various log files, sorted by timestamp.
+
+    同一日志文件内部保持原有顺序，多个日志文件之间按时间戳排序。
+    """
     log_files = [
         'alpha_orchestrator.log',
         'integrated_alpha_miner.log',
@@ -472,23 +520,52 @@ def get_recent_logs():
         'alpha_generator_ollama.log'
     ]
 
-    recent_logs = []
+    import re
+
+    def get_latest_timestamp(lines):
+        """获取日志行的最新时间戳"""
+        for line in reversed(lines):
+            match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+            if match:
+                return match.group(1)
+        return ''
+
+    # 收集每个日志文件的内容
+    log_entries = []
     for log_file in log_files:
         if os.path.exists(log_file):
             try:
-                with open(log_file, 'r') as f:
+                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
                     lines = f.readlines()
-                    # Get last 10 lines
-                    recent_lines = lines[-10:] if len(lines) > 10 else lines
-                    recent_logs.extend([f"[{log_file}] {line.strip()}" for line in recent_lines])
+                    # 取最后 15 行，保持原有顺序
+                    recent_lines = lines[-15:] if len(lines) > 15 else lines
+                    recent_lines = [l.strip() for l in recent_lines if l.strip()]
+
+                    if recent_lines:
+                        # 获取该日志文件最新的时间戳
+                        latest_ts = get_latest_timestamp(recent_lines)
+                        log_entries.append({
+                            'latest_timestamp': latest_ts,
+                            'source': log_file,
+                            'lines': recent_lines  # 保持原有顺序
+                        })
             except Exception as e:
-                recent_logs.append(f"[{log_file}] Error reading log: {str(e)}")
+                log_entries.append({
+                    'latest_timestamp': '',
+                    'source': log_file,
+                    'lines': [f"Error reading log: {str(e)}"]
+                })
 
-    # Sort by timestamp if available
-    recent_logs.sort(reverse=True)
+    # 按每个日志文件的最新时间戳升序排序（最新的文件在最下面）
+    log_entries.sort(key=lambda x: x['latest_timestamp'], reverse=False)
 
-    # Return last 20 log entries
-    return '\n'.join(recent_logs[-20:]) if recent_logs else "No recent logs available"
+    # 格式化输出
+    formatted_logs = []
+    for entry in log_entries:
+        for line in entry['lines']:
+            formatted_logs.append(f"[{entry['source']}] {line}")
+
+    return '\n'.join(formatted_logs) if formatted_logs else "No recent logs available"
 
 @app.route('/')
 def dashboard():
