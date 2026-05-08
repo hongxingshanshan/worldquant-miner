@@ -48,25 +48,21 @@ echo ^|     - Analyze submitted Alpha                                           
 echo ^|     - Correlation check                                                        ^|
 echo ^|     - Performance report                                                       ^|
 echo +--------------------------------------------------------------------------------+
-echo ^|  6. Web Dashboard         Start Monitoring Panel Separately                    ^|
-echo ^|     - Only start naive-ollama Web Dashboard                                    ^|
-echo +--------------------------------------------------------------------------------+
-echo ^|  7. Model Selection       Interactive LLM Model Selection                      ^|
+echo ^|  6. Model Selection       Interactive LLM Model Selection                      ^|
 echo ^|     - View installed models                                                    ^|
 echo ^|     - Set default model                                                        ^|
 echo ^|     - Pull new models                                                          ^|
 echo +--------------------------------------------------------------------------------+
 echo.
 
-set /p choice="Please select version to start (1-7): "
+set /p choice="Please select version to start (1-6): "
 
 if "%choice%"=="1" goto naive_ollama
 if "%choice%"=="2" goto consultant_naive
 if "%choice%"=="3" goto consultant_bandit
 if "%choice%"=="4" goto generation_two
 if "%choice%"=="5" goto alpha_icu
-if "%choice%"=="6" goto web_dashboard
-if "%choice%"=="7" goto model_selector
+if "%choice%"=="6" goto model_selector
 
 echo [Error] Invalid selection
 pause
@@ -165,18 +161,6 @@ if not exist credential.txt (
 )
 echo [Starting] Alpha Analysis...
 python main.py --credentials ./credential.txt
-goto end
-
-:web_dashboard
-echo.
-echo ================================================================================
-echo   Starting Web Dashboard - Monitoring Panel
-echo ================================================================================
-echo.
-cd generation_one\naive-ollama
-echo [Starting] Web Dashboard...
-echo [Info] Visit http://localhost:5000
-python web_dashboard.py
 goto end
 
 :model_selector
