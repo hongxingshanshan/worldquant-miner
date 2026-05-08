@@ -4,6 +4,7 @@ import json
 import os
 import time
 import logging
+import logging.handlers
 import random
 import numpy as np
 from typing import List, Dict, Tuple, Optional
@@ -15,6 +16,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pickle
 from datetime import datetime, timedelta
 import math
+import threading
+import queue
+import traceback
 
 # 尝试导入配置管理器
 try:
@@ -23,21 +27,31 @@ try:
 except ImportError:
     CONFIG_AVAILABLE = False
 
-# Configure logging with immediate flush
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('adaptive_alpha_miner.log', mode='a', encoding='utf-8')
-    ]
-)
-logger = logging.getLogger(__name__)
+# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
+# 创建日志队列
+log_queue = queue.Queue(-1)  # 无限大小
 
-# 强制刷新日志
-for handler in logger.handlers:
-    if hasattr(handler, 'flush'):
-        handler.flush()
+# 创建 QueueHandler
+queue_handler = logging.handlers.QueueHandler(log_queue)
+
+# 创建实际的 handlers
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+file_handler = logging.FileHandler('adaptive_alpha_miner.log', mode='a', encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+# 创建 QueueListener（在主线程启动）
+queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
+queue_listener.start()
+
+# 创建 logger 并添加 QueueHandler
+logger = logging.getLogger('adaptive_alpha_miner')
+logger.setLevel(logging.INFO)
+logger.addHandler(queue_handler)
+logger.propagate = False  # 不传播到 root logger
 
 @dataclass
 class SimulationSettings:

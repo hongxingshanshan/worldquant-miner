@@ -70,6 +70,9 @@ hopeful_alphas.json*
 # Runtime state files
 **/model_fleet_state.json
 **/adaptive_miner_state.json
+**/bandit_state.pkl
+**/integrated_miner_state.json
+**/model_fleet_state.json
 
 # MCP tools
 .playwright-mcp/

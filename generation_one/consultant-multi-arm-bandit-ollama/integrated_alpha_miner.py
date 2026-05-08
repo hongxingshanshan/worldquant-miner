@@ -4,6 +4,7 @@ import json
 import os
 import time
 import logging
+import logging.handlers
 import subprocess
 import sys
 import threading
@@ -11,20 +12,30 @@ from typing import List, Dict
 from dataclasses import dataclass
 import schedule
 from datetime import datetime, timedelta
+import queue
 
 # Import the adaptive miner
 from adaptive_alpha_miner import AdaptiveAlphaMiner, AlphaResult
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('integrated_alpha_miner.log')
-    ]
-)
-logger = logging.getLogger(__name__)
+# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
+log_queue = queue.Queue(-1)
+queue_handler = logging.handlers.QueueHandler(log_queue)
+
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+file_handler = logging.FileHandler('integrated_alpha_miner.log', mode='a', encoding='utf-8')
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
+queue_listener.start()
+
+logger = logging.getLogger('integrated_alpha_miner')
+logger.setLevel(logging.INFO)
+logger.addHandler(queue_handler)
+logger.propagate = False
 
 @dataclass
 class MiningConfig:
@@ -36,7 +47,7 @@ class MiningConfig:
     generator_sleep_time: int = 30
     mining_interval_hours: int = 6
     ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "deepseek-r1:8b"
+    ollama_model: str = "llama3:8b"
 
 class IntegratedAlphaMiner:
     """Integrated alpha miner that combines adaptive mining with alpha generation."""
@@ -354,8 +365,8 @@ def main():
                       help='Mining interval in hours for continuous mode (default: 6)')
     parser.add_argument('--ollama-url', type=str, default='http://localhost:11434',
                       help='Ollama API URL (default: http://localhost:11434)')
-    parser.add_argument('--ollama-model', type=str, default='deepseek-r1:8b',
-                      help='Ollama model to use (default: deepseek-r1:8b)')
+    parser.add_argument('--ollama-model', type=str, default='llama3:8b',
+                      help='Ollama model to use (default: llama3:8b)')
     
     args = parser.parse_args()
     
