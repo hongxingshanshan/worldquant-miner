@@ -13,6 +13,7 @@ import ctypes
 import signal
 import atexit
 import psutil
+from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
 
@@ -27,6 +28,8 @@ class AlphaDashboard:
         self.submission_log_file = "submission_log.json"
         self.results_dir = "results"
         self.logs_dir = "logs"
+        self.credentials_path = "credential.txt"
+        self.sess = None  # WorldQuant API session
         
     def get_system_status(self) -> Dict:
         """Get overall system status."""
@@ -374,6 +377,212 @@ class AlphaDashboard:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def _get_wq_session(self) -> Optional[requests.Session]:
+        """获取 WorldQuant Brain API 会话"""
+        if self.sess is not None:
+            return self.sess
+
+        try:
+            if os.path.exists(self.credentials_path):
+                with open(self.credentials_path, 'r') as f:
+                    credentials = json.load(f)
+
+                self.sess = requests.Session()
+                self.sess.auth = HTTPBasicAuth(credentials[0], credentials[1])
+                response = self.sess.post('https://api.worldquantbrain.com/authentication', timeout=10)
+
+                if response.status_code == 201:
+                    logger.info("WorldQuant API 认证成功")
+                    return self.sess
+                else:
+                    logger.warning(f"WorldQuant API 认证失败: {response.status_code}")
+                    self.sess = None
+        except Exception as e:
+            logger.warning(f"获取 WorldQuant 会话失败: {e}")
+            self.sess = None
+
+        return self.sess
+
+    def get_simulation_status(self, sim_id: str) -> Dict:
+        """获取模拟任务状态"""
+        result = {
+            "success": False,
+            "data": None,
+            "error": None
+        }
+
+        try:
+            sess = self._get_wq_session()
+            if sess is None:
+                result["error"] = "无法连接到 WorldQuant Brain API"
+                return result
+
+            response = sess.get(
+                f'https://api.worldquantbrain.com/simulations/{sim_id}',
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                result["success"] = True
+                result["data"] = self._format_simulation_data(data)
+            elif response.status_code == 404:
+                result["error"] = f"模拟任务不存在: {sim_id}"
+            else:
+                result["error"] = f"API 错误: {response.status_code}"
+        except requests.exceptions.Timeout:
+            result["error"] = "请求超时"
+        except Exception as e:
+            result["error"] = f"查询失败: {str(e)}"
+
+        return result
+
+    def get_alpha_details(self, alpha_id: str) -> Dict:
+        """获取 Alpha 详细信息"""
+        result = {
+            "success": False,
+            "data": None,
+            "error": None
+        }
+
+        try:
+            sess = self._get_wq_session()
+            if sess is None:
+                result["error"] = "无法连接到 WorldQuant Brain API"
+                return result
+
+            response = sess.get(
+                f'https://api.worldquantbrain.com/alphas/{alpha_id}',
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                result["success"] = True
+                result["data"] = self._format_alpha_data(data)
+            elif response.status_code == 404:
+                result["error"] = f"Alpha 不存在: {alpha_id}"
+            else:
+                result["error"] = f"API 错误: {response.status_code}"
+        except requests.exceptions.Timeout:
+            result["error"] = "请求超时"
+        except Exception as e:
+            result["error"] = f"查询失败: {str(e)}"
+
+        return result
+
+    def _format_simulation_data(self, data: Dict) -> Dict:
+        """格式化模拟任务数据为中文友好格式"""
+        status_map = {
+            "PENDING": "等待中",
+            "RUNNING": "运行中",
+            "COMPLETE": "已完成",
+            "ERROR": "错误",
+            "FAIL": "失败"
+        }
+
+        formatted = {
+            "id": data.get("id", ""),
+            "类型": data.get("type", ""),
+            "状态": status_map.get(data.get("status", ""), data.get("status", "未知")),
+            "表达式": data.get("regular", ""),
+            "alpha_id": data.get("alpha", ""),
+            "设置": {
+                "工具类型": data.get("settings", {}).get("instrumentType", ""),
+                "区域": data.get("settings", {}).get("region", ""),
+                "股票池": data.get("settings", {}).get("universe", ""),
+                "延迟": data.get("settings", {}).get("delay", ""),
+                "衰减": data.get("settings", {}).get("decay", ""),
+                "中性化": data.get("settings", {}).get("neutralization", ""),
+                "截断": data.get("settings", {}).get("truncation", ""),
+            }
+        }
+
+        return formatted
+
+    def _format_alpha_data(self, data: Dict) -> Dict:
+        """格式化 Alpha 数据为中文友好格式"""
+        grade_map = {
+            "INFERIOR": "较差",
+            "AVERAGE": "一般",
+            "GOOD": "良好",
+            "EXCELLENT": "优秀"
+        }
+
+        status_map = {
+            "UNSUBMITTED": "未提交",
+            "SUBMITTED": "已提交",
+            "CORRELATION": "相关性检查中",
+            "FAIL": "失败"
+        }
+
+        check_result_map = {
+            "PASS": "通过",
+            "FAIL": "未通过",
+            "PENDING": "待检查"
+        }
+
+        # 格式化检查项
+        checks = []
+        for check in data.get("is", {}).get("checks", []):
+            checks.append({
+                "名称": self._translate_check_name(check.get("name", "")),
+                "结果": check_result_map.get(check.get("result", ""), check.get("result", "")),
+                "限制": check.get("limit", ""),
+                "值": check.get("value", "")
+            })
+
+        formatted = {
+            "id": data.get("id", ""),
+            "表达式": data.get("regular", {}).get("code", ""),
+            "描述": data.get("regular", {}).get("description", "无"),
+            "等级": grade_map.get(data.get("grade", ""), data.get("grade", "未知")),
+            "状态": status_map.get(data.get("status", ""), data.get("status", "未知")),
+            "创建时间": data.get("dateCreated", ""),
+            "提交时间": data.get("dateSubmitted", "未提交"),
+            "IS性能": {
+                "夏普比率": data.get("is", {}).get("sharpe", ""),
+                "适应度": data.get("is", {}).get("fitness", ""),
+                "换手率": data.get("is", {}).get("turnover", ""),
+                "收益率": data.get("is", {}).get("returns", ""),
+                "最大回撤": data.get("is", {}).get("drawdown", ""),
+                "多头数量": data.get("is", {}).get("longCount", ""),
+                "空头数量": data.get("is", {}).get("shortCount", ""),
+                "PnL": data.get("is", {}).get("pnl", ""),
+                "本金": data.get("is", {}).get("bookSize", ""),
+            },
+            "检查项": checks,
+            "设置": {
+                "工具类型": data.get("settings", {}).get("instrumentType", ""),
+                "区域": data.get("settings", {}).get("region", ""),
+                "股票池": data.get("settings", {}).get("universe", ""),
+                "延迟": data.get("settings", {}).get("delay", ""),
+                "衰减": data.get("settings", {}).get("decay", ""),
+                "中性化": data.get("settings", {}).get("neutralization", ""),
+                "截断": data.get("settings", {}).get("truncation", ""),
+                "开始日期": data.get("settings", {}).get("startDate", ""),
+                "结束日期": data.get("settings", {}).get("endDate", ""),
+            },
+            "分类": [c.get("name", "") for c in data.get("classifications", [])],
+            "标签": data.get("tags", []),
+        }
+
+        return formatted
+
+    def _translate_check_name(self, name: str) -> str:
+        """翻译检查项名称"""
+        translations = {
+            "LOW_SHARPE": "低夏普比率",
+            "LOW_FITNESS": "低适应度",
+            "LOW_TURNOVER": "低换手率",
+            "HIGH_TURNOVER": "高换手率",
+            "CONCENTRATED_WEIGHT": "权重集中",
+            "LOW_SUB_UNIVERSE_SHARPE": "子股票池低夏普",
+            "SELF_CORRELATION": "自相关性",
+            "MATCHES_COMPETITION": "比赛匹配"
+        }
+        return translations.get(name, name)
+
 # Global dashboard instance
 dashboard = AlphaDashboard()
 
@@ -421,6 +630,16 @@ def api_trigger_alpha_generation():
 def api_refresh():
     """API endpoint to refresh status."""
     return jsonify(dashboard.get_system_status())
+
+@app.route('/api/simulation/<sim_id>')
+def api_simulation_status(sim_id):
+    """API endpoint to get simulation status."""
+    return jsonify(dashboard.get_simulation_status(sim_id))
+
+@app.route('/api/alpha/<alpha_id>')
+def api_alpha_details(alpha_id):
+    """API endpoint to get alpha details."""
+    return jsonify(dashboard.get_alpha_details(alpha_id))
 
 def setup_cleanup_handler():
     """设置 Windows 控制台关闭事件处理器"""
