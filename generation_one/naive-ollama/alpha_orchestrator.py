@@ -27,6 +27,13 @@ except ImportError:
     logger_warning = logging.getLogger(__name__)
     logger_warning.warning("config_manager 模块未找到，使用默认配置")
 
+# 导入统一 LLM 客户端
+try:
+    from llm_client import LLMClient
+    LLM_CLIENT_AVAILABLE = True
+except ImportError:
+    LLM_CLIENT_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -316,6 +323,17 @@ class AlphaOrchestrator:
             self.config_manager = get_config_manager(config_path)
             self.config = self.config_manager.config
 
+        # 初始化统一 LLM 客户端
+        self.llm_client = None
+        self.use_online_llm = False
+        if LLM_CLIENT_AVAILABLE:
+            try:
+                self.llm_client = LLMClient(config_path)
+                self.use_online_llm = self.llm_client.is_online()
+                logger.info(f"LLM 客户端初始化成功 - 提供商: {self.llm_client.get_provider()}, 模型: {self.llm_client.get_model_name()}")
+            except Exception as e:
+                logger.warning(f"LLM 客户端初始化失败: {e}")
+
         # Concurrency control
         self.max_concurrent_simulations = self.config.max_concurrent if self.config else 3
         self.simulation_semaphore = threading.Semaphore(self.max_concurrent_simulations)
@@ -324,10 +342,16 @@ class AlphaOrchestrator:
         self.miner_process = None
         self._child_processes = []  # 跟踪所有子进程
 
-        # Model fleet management
-        self.model_fleet_manager = ModelFleetManager(ollama_url, config_path, model_override)
+        # Model fleet management (仅 Ollama 模式需要)
+        self.model_fleet_manager = None
         self.vram_monitoring_active = False
         self.vram_monitor_thread = None
+
+        if not self.use_online_llm:
+            self.model_fleet_manager = ModelFleetManager(ollama_url, config_path, model_override)
+            logger.info("使用 Ollama 本地模型，启用 VRAM 监控")
+        else:
+            logger.info("使用线上大模型，跳过 VRAM 监控")
 
         # Restart mechanism
         self.restart_interval = 1800  # 30 minutes in seconds
@@ -643,7 +667,7 @@ class AlphaOrchestrator:
                         '--expression', expression,
                         '--auto-mode',  # Run in automated mode
                         '--output-file', f'mining_results_{i}.json'
-                    ], capture_output=True, text=True, timeout=300)
+                    ], capture_output=True, text=True, timeout=3000)
                     
                     if result.returncode == 0:
                         logger.info(f"Successfully mined alpha {i}")
@@ -725,10 +749,15 @@ class AlphaOrchestrator:
         """Start alpha generator in continuous mode as a background process."""
         logger.info("Starting alpha generator in continuous mode...")
 
-        # Get current model from fleet manager
-        current_model = self.model_fleet_manager.get_current_model().name
+        # Get current model
+        if self.use_online_llm and self.llm_client:
+            current_model = self.llm_client.get_model_name()
+        elif self.model_fleet_manager:
+            current_model = self.model_fleet_manager.get_current_model().name
+        else:
+            current_model = "llama3:8b"
         logger.info(f"Using model: {current_model}")
-        
+
         try:
             self.generator_process = subprocess.Popen([
                 sys.executable, 'alpha_generator_ollama.py',
@@ -742,7 +771,7 @@ class AlphaOrchestrator:
             # 添加到子进程跟踪列表
             self._child_processes.append(self.generator_process)
             logger.info(f"Alpha generator started with PID: {self.generator_process.pid}")
-            
+
         except Exception as e:
             logger.error(f"Error starting alpha generator: {e}")
 
@@ -853,19 +882,22 @@ class AlphaOrchestrator:
     def continuous_mining(self, mining_interval_hours: int = 6):
         """Run continuous mining with concurrent alpha generation and expression mining."""
         logger.info(f"Starting continuous mining with {mining_interval_hours}h intervals...")
-        
+
         try:
-            # Start VRAM monitoring
-            logger.info("Starting VRAM monitoring...")
-            self.start_vram_monitoring()
-            
+            # Start VRAM monitoring (仅 Ollama 模式)
+            if not self.use_online_llm:
+                logger.info("Starting VRAM monitoring...")
+                self.start_vram_monitoring()
+            else:
+                logger.info("Using online LLM, skipping VRAM monitoring")
+
             # Start restart monitoring
             logger.info("Starting restart monitoring...")
             self.start_restart_monitoring()
-            
+
             # Start alpha generator in continuous mode
             self.start_alpha_generator_continuous(batch_size=3, sleep_time=30)
-            
+
             # Start alpha expression miner in a separate thread
             miner_thread = threading.Thread(
                 target=self.start_alpha_expression_miner_continuous,
@@ -873,33 +905,35 @@ class AlphaOrchestrator:
                 daemon=True
             )
             miner_thread.start()
-            
+
             # Schedule daily submission at 2 PM
             schedule.every().day.at("14:00").do(self.run_alpha_submitter)
-            
+
             logger.info("Both alpha generator and expression miner are running concurrently")
             logger.info(f"Max concurrent simulations: {self.max_concurrent_simulations}")
-            
+            if self.use_online_llm:
+                logger.info(f"Using online LLM: {self.llm_client.get_model_name()}")
+
             while self.running:
                 try:
                     # Run pending scheduled tasks
                     schedule.run_pending()
-                    
+
                     # Check if generator process is still running
                     if self.generator_process and self.generator_process.poll() is not None:
                         logger.warning("Alpha generator process stopped, restarting...")
                         self.start_alpha_generator_continuous(batch_size=3, sleep_time=30)
-                    
+
                     # Small delay before next cycle
                     time.sleep(60)
-                    
+
                 except KeyboardInterrupt:
                     logger.info("Received interrupt signal, stopping...")
                     break
                 except Exception as e:
                     logger.error(f"Error in continuous mining: {e}")
                     time.sleep(300)  # Wait 5 minutes before retrying
-                    
+
         finally:
             self.stop_processes()
 

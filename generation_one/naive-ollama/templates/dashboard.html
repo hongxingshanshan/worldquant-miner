@@ -379,16 +379,29 @@
                         <span class="metric-value">${stats.total_alphas_generated || 0}</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Successful:</span>
-                        <span class="metric-value">${stats.successful_alphas || 0}</span>
+                        <span class="metric-label">Simulations Completed:</span>
+                        <span class="metric-value">${stats.simulations_completed || 0}</span>
                     </div>
+                    <div class="metric">
+                        <span class="metric-label">Quality Alphas (fitness>0.5):</span>
+                        <span class="metric-value" style="color: #4CAF50;">${stats.quality_alphas || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Failed Simulations:</span>
+                        <span class="metric-value" style="color: #f44336;">${stats.failed_simulations || 0}</span>
+                    </div>
+                    <hr style="margin: 10px 0; border-color: #444;">
                     <div class="metric">
                         <span class="metric-label">Last 24h Generated:</span>
                         <span class="metric-value">${stats.last_24h_generated || 0}</span>
                     </div>
                     <div class="metric">
-                        <span class="metric-label">Last 24h Successful:</span>
-                        <span class="metric-value">${stats.last_24h_successful || 0}</span>
+                        <span class="metric-label">Last 24h Completed:</span>
+                        <span class="metric-value">${stats.last_24h_completed || 0}</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Last 24h Quality:</span>
+                        <span class="metric-value" style="color: #4CAF50;">${stats.last_24h_quality || 0}</span>
                     </div>
                 </div>
             `;

@@ -76,3 +76,14 @@ hopeful_alphas.json*
 
 # MCP tools
 .playwright-mcp/
+
+# Runtime cache files
+simulation_errors.json
+**/simulation_errors.json
+
+# Claude local settings
+.claude/settings.local.json
+
+# Fetch scripts (one-time use)
+**/fetch_community_*.py
+**/fetch_community_batch.py

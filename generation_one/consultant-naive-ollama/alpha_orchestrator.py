@@ -716,7 +716,7 @@ class AlphaOrchestrator:
                         '--expression', expression,
                         '--auto-mode',  # Run in automated mode
                         '--output-file', f'mining_results_{i}.json'
-                    ], capture_output=True, text=True, timeout=40)
+                    ], capture_output=True, text=True, timeout=3000)
                     
                     if result.returncode == 0:
                         logger.info(f"Successfully mined alpha {i}")

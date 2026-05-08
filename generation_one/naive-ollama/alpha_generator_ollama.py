@@ -24,8 +24,292 @@ try:
 except ImportError:
     CONFIG_AVAILABLE = False
 
+# 尝试导入统一 LLM 客户端
+try:
+    from llm_client import LLMClient
+    LLM_CLIENT_AVAILABLE = True
+except ImportError:
+    LLM_CLIENT_AVAILABLE = False
+
 # Configure logger
 logger = logging.getLogger(__name__)
+
+# 知识库路径（统一存放在项目根目录的 knowledge_base 文件夹）
+KNOWLEDGE_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                                    'knowledge_base')
+
+# 成功模式缓存文件
+SUCCESSFUL_PATTERNS_FILE = "successful_patterns.json"
+SUBMITTED_ALPHAS_CACHE = "submitted_alphas_cache.json"
+
+
+def load_successful_patterns(max_patterns: int = 20) -> List[Dict]:
+    """加载成功的 alpha 模式（fitness > 0.5）"""
+    patterns = []
+    results_dir = "results"
+
+    if not os.path.exists(results_dir):
+        return patterns
+
+    try:
+        # 获取所有结果文件
+        result_files = [f for f in os.listdir(results_dir) if f.endswith('.json')]
+
+        # 按修改时间排序，优先使用最新的
+        result_files.sort(key=lambda x: os.path.getmtime(os.path.join(results_dir, x)), reverse=True)
+
+        for filename in result_files[:100]:  # 只检查最近 100 个文件
+            if len(patterns) >= max_patterns:
+                break
+            filepath = os.path.join(results_dir, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict):
+                                alpha_data = item.get("alpha_data", {})
+                                fitness = alpha_data.get("is", {}).get("fitness")
+                                expression = item.get("alpha", "")
+                                if fitness is not None and fitness > 0.5 and expression:
+                                    patterns.append({
+                                        "expression": expression,
+                                        "fitness": fitness,
+                                        "sharpe": alpha_data.get("is", {}).get("sharpe"),
+                                        "turnover": alpha_data.get("is", {}).get("turnover"),
+                                    })
+                    elif isinstance(data, dict):
+                        alpha_data = data.get("alpha_data", {})
+                        fitness = alpha_data.get("is", {}).get("fitness")
+                        expression = data.get("alpha", "")
+                        if fitness is not None and fitness > 0.5 and expression:
+                            patterns.append({
+                                "expression": expression,
+                                "fitness": fitness,
+                                "sharpe": alpha_data.get("is", {}).get("sharpe"),
+                                "turnover": alpha_data.get("is", {}).get("turnover"),
+                            })
+            except Exception as e:
+                continue
+
+        # 按 fitness 排序，取前 N 个
+        patterns.sort(key=lambda x: x.get("fitness", 0), reverse=True)
+        return patterns[:max_patterns]
+
+    except Exception as e:
+        logger.warning(f"Failed to load successful patterns: {e}")
+        return patterns
+
+
+def load_submitted_alphas(sess, max_alphas: int = 20) -> List[Dict]:
+    """从 WorldQuant Brain API 获取已提交的 alpha"""
+    cache_file = SUBMITTED_ALPHAS_CACHE
+    alphas = []
+
+    # 尝试从缓存加载
+    if os.path.exists(cache_file):
+        try:
+            cache_age = time.time() - os.path.getmtime(cache_file)
+            if cache_age < 3600:  # 缓存 1 小时有效
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    alphas = json.load(f)
+                    logger.info(f"Loaded {len(alphas)} submitted alphas from cache")
+                    return alphas[:max_alphas]
+        except Exception as e:
+            logger.warning(f"Failed to load submitted alphas cache: {e}")
+
+    # 从 API 获取 - 使用正确的端点
+    try:
+        response = sess.get(
+            'https://api.worldquantbrain.com/users/self/alphas',
+            params={
+                'limit': 50,
+                'offset': 0,
+                'status!': 'UNSUBMITTED\x1fIS-FAIL',  # 排除未提交和失败的
+                'order': '-dateSubmitted',  # 按提交日期倒序
+                'hidden': 'false'
+            },
+            timeout=30
+        )
+        if response.status_code == 200:
+            data = response.json()
+            for alpha in data.get('results', []):
+                expression = alpha.get('regular', {}).get('code', '').strip()
+                fitness = alpha.get('is', {}).get('fitness')
+                if expression and fitness:
+                    alphas.append({
+                        "expression": expression,
+                        "fitness": fitness,
+                        "sharpe": alpha.get('is', {}).get('sharpe'),
+                        "turnover": alpha.get('is', {}).get('turnover'),
+                        "dateSubmitted": alpha.get('dateSubmitted'),
+                        "grade": alpha.get('grade'),
+                        "status": alpha.get('status'),
+                    })
+
+            # 保存缓存
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(alphas, f, indent=2)
+            logger.info(f"Fetched and cached {len(alphas)} submitted alphas")
+        else:
+            logger.warning(f"Failed to fetch submitted alphas: {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Failed to fetch submitted alphas: {e}")
+
+    return alphas[:max_alphas]
+
+
+def load_knowledge_base() -> str:
+    """加载 WorldQuant Brain 知识库，智能分段加载"""
+    knowledge_parts = []
+
+    # 知识库文件及其关键章节（按优先级）
+    # 注意：worldquant_data_fields_reference.md 与 load_data_fields_reference() 功能重叠
+    # 字段信息通过 load_data_fields_reference() 动态加载，这里不重复加载
+    knowledge_config = [
+        {
+            'filename': 'worldquantbrain_alpha_guide.md',
+            'key_sections': ['Best Practices', 'Common Patterns', 'Tips'],
+            'max_chars': 1500
+        },
+        {
+            'filename': 'worldquantbrain_alpha_templates.md',
+            'key_sections': ['Templates', 'Examples'],
+            'max_chars': 1500
+        },
+        {
+            'filename': 'worldquantbrain_datasets_reference.md',
+            'key_sections': ['Popular Fields', 'Categories'],
+            'max_chars': 1000
+        },
+        {
+            'filename': 'worldquant_community_knowledge.md',
+            'key_sections': ['模拟设置', 'Alpha 研究', '操作符技巧', '常见问题'],
+            'max_chars': 2000
+        },
+    ]
+
+    for config in knowledge_config:
+        filename = config['filename']
+        filepath = os.path.join(KNOWLEDGE_BASE_PATH, filename)
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                # 提取主要内容（跳过 frontmatter）
+                if content.startswith('---'):
+                    parts = content.split('---', 2)
+                    if len(parts) >= 3:
+                        content = parts[2].strip()
+
+                # 智能提取关键章节
+                extracted = extract_key_sections(content, config['key_sections'])
+
+                # 如果没有找到关键章节，使用前 N 字符
+                if not extracted:
+                    extracted = content[:config['max_chars']]
+
+                # 截断到最大长度
+                if len(extracted) > config['max_chars']:
+                    extracted = extracted[:config['max_chars']] + "..."
+
+                knowledge_parts.append(f"### {filename}\n{extracted}")
+            except Exception as e:
+                logger.warning(f"Failed to load knowledge file {filename}: {e}")
+
+    return "\n\n".join(knowledge_parts)
+
+
+def extract_key_sections(content: str, key_sections: List[str]) -> str:
+    """从内容中提取关键章节"""
+    extracted = []
+    lines = content.split('\n')
+    current_section = None
+    section_content = []
+
+    for line in lines:
+        # 检测章节标题 (## 或 ###)
+        if line.startswith('## ') or line.startswith('### '):
+            # 保存上一个章节
+            if current_section and section_content:
+                extracted.append(f"**{current_section}**\n" + '\n'.join(section_content[:10]))
+            # 开始新章节
+            current_section = line.lstrip('#').strip()
+            section_content = []
+        elif current_section:
+            section_content.append(line)
+
+    # 保存最后一个章节
+    if current_section and section_content:
+        extracted.append(f"**{current_section}**\n" + '\n'.join(section_content[:10]))
+
+    # 过滤出关键章节
+    result = []
+    for section in extracted:
+        for key in key_sections:
+            if key.lower() in section.lower():
+                result.append(section)
+                break
+
+    return '\n\n'.join(result)
+
+
+def load_data_fields_reference(max_fields: int = 80) -> str:
+    """加载数据字段参考，用于 prompt 增强"""
+    fields_file = os.path.join(KNOWLEDGE_BASE_PATH, "worldquant_data_fields.json")
+
+    if not os.path.exists(fields_file):
+        return ""
+
+    try:
+        with open(fields_file, 'r', encoding='utf-8') as f:
+            all_fields = json.load(f)
+
+        # 按数据集分组
+        datasets = {}
+        for field in all_fields:
+            dataset_name = field.get('dataset', {}).get('name', 'Unknown')
+            if dataset_name not in datasets:
+                datasets[dataset_name] = []
+            datasets[dataset_name].append({
+                'id': field.get('id'),
+                'description': field.get('description', '')[:80],
+                'type': field.get('type', ''),
+                'coverage': field.get('coverage', 0)
+            })
+
+        # 选择高覆盖率字段
+        selected_fields = []
+        for dataset_name, fields in datasets.items():
+            # 按覆盖率排序
+            sorted_fields = sorted(fields, key=lambda x: x['coverage'], reverse=True)
+            # 每个数据集取前几个
+            for field in sorted_fields[:8]:
+                selected_fields.append({
+                    'dataset': dataset_name,
+                    **field
+                })
+                if len(selected_fields) >= max_fields:
+                    break
+            if len(selected_fields) >= max_fields:
+                break
+
+        # 格式化输出
+        lines = ["## 高覆盖率数据字段\n"]
+        current_dataset = None
+        for field in sorted(selected_fields, key=lambda x: (x['dataset'], -x['coverage'])):
+            if field['dataset'] != current_dataset:
+                current_dataset = field['dataset']
+                lines.append(f"\n### {current_dataset}\n")
+            lines.append(f"- `{field['id']}`: {field['description']} (覆盖率: {field['coverage']}%)\n")
+
+        return ''.join(lines)
+
+    except Exception as e:
+        logger.warning(f"Failed to load data fields: {e}")
+        return ""
+
 
 class RetryQueue:
     def __init__(self, generator, max_retries=3, retry_delay=60):
@@ -78,6 +362,15 @@ class AlphaGenerator:
         self.operation_count = 0
         self.config_path = config_path
 
+        # 初始化统一 LLM 客户端
+        self.llm_client = None
+        if LLM_CLIENT_AVAILABLE:
+            try:
+                self.llm_client = LLMClient(config_path)
+                logger.info(f"LLM 客户端初始化成功 - 提供商: {self.llm_client.get_provider()}, 模型: {self.llm_client.get_model_name()}")
+            except Exception as e:
+                logger.warning(f"LLM 客户端初始化失败: {e}")
+
         # 从配置文件加载模型舰队
         self.model_fleet = self._load_model_fleet()
         self.initial_model = getattr(self, 'model_name', self.model_fleet[0] if self.model_fleet else 'llama3:8b')
@@ -120,7 +413,7 @@ class AlphaGenerator:
         self.sess.auth = HTTPBasicAuth(username, password)
         
         logging.info("Authenticating with WorldQuant Brain...")
-        response = self.sess.post('https://api.worldquantbrain.com/authentication')
+        response = self.sess.post('https://api.worldquantbrain.com/authentication', timeout=30)
         logging.info(f"Authentication response status: {response.status_code}")
         logging.debug(f"Authentication response: {response.text[:500]}...")
         
@@ -168,7 +461,7 @@ class AlphaGenerator:
                 params['limit'] = 1  # Just to get count efficiently
 
                 time.sleep(api_request_delay)  # 请求前等待
-                count_response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params)
+                count_response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params, timeout=30)
 
                 if count_response.status_code == 200:
                     count_data = count_response.json()
@@ -185,7 +478,7 @@ class AlphaGenerator:
                         params['limit'] = min(20, total_fields)  # Don't exceed total fields
 
                         time.sleep(api_request_delay)  # 请求前等待
-                        response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params)
+                        response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params, timeout=30)
 
                         if response.status_code == 200:
                             data = response.json()
@@ -209,7 +502,7 @@ class AlphaGenerator:
     def get_operators(self) -> List[Dict]:
         """Fetch available operators from WorldQuant Brain."""
         print("Requesting operators...")
-        response = self.sess.get('https://api.worldquantbrain.com/operators')
+        response = self.sess.get('https://api.worldquantbrain.com/operators', timeout=30)
         print(f"Operators response status: {response.status_code}")
         print(f"Operators response: {response.text[:500]}...")  # Print first 500 chars
         
@@ -250,7 +543,7 @@ class AlphaGenerator:
         return cleaned_ideas
 
     def generate_alpha_ideas_with_ollama(self, data_fields: List[Dict], operators: List[Dict]) -> List[str]:
-        """Generate alpha ideas using Ollama with FinGPT model."""
+        """Generate alpha ideas using LLM (Ollama or online model)."""
         print("Organizing operators by category...")
         operator_by_category = {}
         for op in operators:
@@ -277,7 +570,7 @@ class AlphaGenerator:
                 sample_size = max(1, int(len(ops) * 0.5))  # At least 1 operator per category
                 sampled_operators[category] = random.sample(ops, sample_size)
 
-            print("Preparing prompt for FinGPT...")
+            print("Preparing prompt for LLM...")
             # Format operators with their types, definitions, and descriptions
             def format_operators(ops):
                 formatted = []
@@ -286,6 +579,51 @@ class AlphaGenerator:
                                    f"  Definition: {op['definition']}\n"
                                    f"  Description: {op['description']}")
                 return formatted
+
+            # 获取最近的错误信息，供大模型参考
+            recent_errors = self.get_simulation_errors()[-10:]  # 最近 10 条错误
+            error_context = ""
+            if recent_errors:
+                error_context = "\n\nRecent Errors to Avoid:\n"
+                for err in recent_errors[-5:]:  # 只显示最近 5 条
+                    error_context += f"- {err.get('expression', '')[:60]}...\n"
+                    error_context += f"  Error: {err.get('error_message', 'Unknown')}\n"
+
+            # 加载知识库
+            knowledge_base = load_knowledge_base()
+            knowledge_context = ""
+            if knowledge_base:
+                knowledge_context = f"\n\n### WorldQuant Brain Knowledge Base:\n{knowledge_base}\n"
+
+            # 加载数据字段参考（高覆盖率字段）
+            data_fields_ref = load_data_fields_reference(max_fields=80)
+            fields_ref_context = ""
+            if data_fields_ref:
+                fields_ref_context = f"\n\n### High-Coverage Data Fields (Recommended):\n{data_fields_ref}\n"
+
+            # 加载成功的 alpha 模式（fitness 反馈）
+            successful_patterns = load_successful_patterns(max_patterns=10)
+            success_context = ""
+            if successful_patterns:
+                success_context = "\n\n### Successful Alpha Patterns (High Fitness, Learn from These):\n"
+                for i, pattern in enumerate(successful_patterns[:5], 1):
+                    success_context += f"{i}. {pattern['expression'][:80]}\n"
+                    success_context += f"   Fitness: {pattern.get('fitness', 'N/A'):.3f}"
+                    if pattern.get('sharpe'):
+                        success_context += f", Sharpe: {pattern['sharpe']:.2f}"
+                    success_context += "\n"
+
+            # 加载已提交的 alpha（从 WQ API）
+            submitted_alphas = load_submitted_alphas(self.sess, max_alphas=10)
+            submitted_context = ""
+            if submitted_alphas:
+                submitted_context = "\n\n### Previously Submitted Alphas (Reference):\n"
+                for i, alpha in enumerate(submitted_alphas[:5], 1):
+                    submitted_context += f"{i}. {alpha['expression'][:80]}\n"
+                    submitted_context += f"   Fitness: {alpha.get('fitness', 'N/A'):.3f}"
+                    if alpha.get('dateSubmitted'):
+                        submitted_context += f", Submitted: {alpha['dateSubmitted'][:10]}"
+                    submitted_context += "\n"
 
             prompt = f"""Generate 5 unique alpha factor expressions using the available operators and data fields. Return ONLY the expressions, one per line, with no comments or explanations.
 
@@ -313,16 +651,21 @@ Transformational:
 
 Group:
 {chr(10).join(format_operators(sampled_operators.get('Group', [])))}
-
+{error_context}{knowledge_context}{fields_ref_context}{success_context}{submitted_context}
 Requirements:
 1. Let your intuition guide you.
 2. Use the operators and data fields to create a unique and potentially profitable alpha factor.
 3. Anything is possible 42.
+4. Avoid using event-type data fields (like nws12_*, fnd6_newqeventv*) with time series operators (ts_rank, ts_sum, etc.) as they don't support event inputs.
 
-Tips: 
+Tips:
 - You can use semi-colons to separate expressions.
 - Pay attention to operator types (SCALAR, VECTOR, MATRIX) for compatibility.
 - Study the operator definitions and descriptions to understand their behavior.
+- Avoid the error patterns shown in "Recent Errors to Avoid" section.
+- Use the knowledge base above to create better alpha expressions.
+- Learn from the successful patterns - they have high fitness scores.
+- Reference submitted alphas for style and complexity guidance.
 
 Example format:
 ts_std_dev(cashflow_op, 180)
@@ -330,59 +673,76 @@ rank(divide(revenue, assets))
 market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6_newqeventv110_optrfrq);expected_return = rfr+beta_last_360_days_spy*(market_ret-rfr);actual_return = ts_product(returns+1,250)-1;actual_return-expected_return
 """
 
-            # Prepare Ollama API request
-            model_name = getattr(self, 'model_name', self.model_fleet[self.current_model_index])
-            ollama_data = {
-                'model': model_name,
-                'prompt': prompt,
-                'stream': False,
-                'temperature': 0.3,
-                'top_p': 0.9,
-                'num_predict': 1000  # Use num_predict instead of max_tokens for Ollama
-            }
+            # 系统提示词（用于线上模型）
+            system_prompt = """你是一个量化金融专家，专门生成 Alpha 因子表达式。
+规则：
+1. 只返回表达式，每行一个
+2. 不添加注释或解释
+3. 使用提供的操作符和数据字段
+4. 确保表达式语法正确
+5. 使用中文回复"""
 
-            print("Sending request to Ollama API...")
-            try:
-                response = requests.post(
-                    f'{self.ollama_url}/api/generate',
-                    json=ollama_data,
-                    timeout=360  # 6 minutes timeout
-                )
-
-                print(f"Ollama API response status: {response.status_code}")
-                print(f"Ollama API response: {response.text[:500]}...")  # Print first 500 chars
-
-                if response.status_code == 500:
-                    logging.error(f"Ollama API returned 500 error: {response.text}")
-                    # Trigger model downgrade for 500 errors
-                    self._handle_ollama_error("500_error")
+            # 使用统一 LLM 客户端
+            if self.llm_client:
+                print(f"Sending request to LLM ({self.llm_client.get_provider()}: {self.llm_client.get_model_name()})...")
+                try:
+                    if self.llm_client.is_online():
+                        content = self.llm_client.generate(prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=1000)
+                    else:
+                        content = self.llm_client.generate(prompt, temperature=0.3, max_tokens=1000)
+                    print(f"LLM response received ({len(content)} chars)")
+                except Exception as e:
+                    logging.error(f"LLM request failed: {e}")
+                    self._handle_llm_error(str(e))
                     return []
-                elif response.status_code != 200:
-                    raise Exception(f"Ollama API request failed: {response.text}")
-                    
-            except requests.exceptions.Timeout:
-                logging.error("Ollama API request timed out (360s)")
-                # Trigger model downgrade for timeouts
-                self._handle_ollama_error("timeout")
-                return []
-            except requests.exceptions.ConnectionError as e:
-                if "Read timed out" in str(e):
-                    logging.error("Ollama API read timeout")
-                    # Trigger model downgrade for read timeouts
-                    self._handle_ollama_error("read_timeout")
+            else:
+                # 回退到原有 Ollama 直接调用
+                print("Sending request to Ollama API (fallback)...")
+                model_name = getattr(self, 'model_name', self.model_fleet[self.current_model_index])
+                ollama_data = {
+                    'model': model_name,
+                    'prompt': prompt,
+                    'stream': False,
+                    'temperature': 0.3,
+                    'top_p': 0.9,
+                    'num_predict': 1000
+                }
+
+                try:
+                    response = requests.post(
+                        f'{self.ollama_url}/api/generate',
+                        json=ollama_data,
+                        timeout=360
+                    )
+
+                    print(f"Ollama API response status: {response.status_code}")
+
+                    if response.status_code == 500:
+                        logging.error(f"Ollama API returned 500 error: {response.text}")
+                        self._handle_llm_error("500_error")
+                        return []
+                    elif response.status_code != 200:
+                        raise Exception(f"Ollama API request failed: {response.text}")
+
+                    response_data = response.json()
+                    if 'response' not in response_data:
+                        raise Exception(f"Unexpected Ollama API response format: {response_data}")
+                    content = response_data['response']
+
+                except requests.exceptions.Timeout:
+                    logging.error("Ollama API request timed out (360s)")
+                    self._handle_llm_error("timeout")
                     return []
-                else:
-                    raise e
+                except requests.exceptions.ConnectionError as e:
+                    if "Read timed out" in str(e):
+                        logging.error("Ollama API read timeout")
+                        self._handle_llm_error("read_timeout")
+                        return []
+                    else:
+                        raise e
 
-            response_data = response.json()
-            print(f"Ollama API response JSON keys: {list(response_data.keys())}")
+            print("Processing LLM response...")
 
-            if 'response' not in response_data:
-                raise Exception(f"Unexpected Ollama API response format: {response_data}")
-
-            print("Processing Ollama API response...")
-            content = response_data['response']
-            
             # Extract pure alpha expressions by:
             # 1. Remove markdown backticks
             # 2. Remove numbering (e.g., "1. ", "2. ")
@@ -398,31 +758,36 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
                     line = line.split('. ', 1)[1]
                 if line and not line.startswith('Comment:'):
                     alpha_ideas.append(line)
-            
+
             print(f"Generated {len(alpha_ideas)} alpha ideas")
             for i, alpha in enumerate(alpha_ideas, 1):
                 print(f"Alpha {i}: {alpha}")
-            
+
             # Clean and validate ideas
             cleaned_ideas = self.clean_alpha_ideas(alpha_ideas)
             logging.info(f"Found {len(cleaned_ideas)} valid alpha expressions")
-            
+
             return cleaned_ideas
 
         except Exception as e:
             if "token limit" in str(e).lower():
-                self._hit_token_limit = True  # Mark that we hit token limit
+                self._hit_token_limit = True
             logging.error(f"Error generating alpha ideas: {str(e)}")
             return []
-    
-    def _handle_ollama_error(self, error_type: str):
-        """Handle Ollama errors by downgrading model if needed."""
+
+    def _handle_llm_error(self, error_type: str):
+        """Handle LLM errors by downgrading model if needed (only for Ollama)."""
+        # 线上模型不需要降级
+        if self.llm_client and self.llm_client.is_online():
+            logging.warning(f"Online LLM error ({error_type}), will retry with same model")
+            return
+
         self.error_count += 1
         logging.warning(f"Ollama error ({error_type}) - Count: {self.error_count}/{self.max_errors_before_downgrade}")
-        
+
         if self.error_count >= self.max_errors_before_downgrade:
             self._downgrade_model()
-            self.error_count = 0  # Reset error count after downgrade
+            self.error_count = 0
     
     def _downgrade_model(self):
         """Downgrade to the next smaller model in the fleet."""
@@ -554,59 +919,70 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
                     completed.append(sim_id)
                     continue
                 try:
-                    sim_progress_resp = self.sess.get(info["progress_url"])
+                    sim_progress_resp = self.sess.get(info["progress_url"], timeout=30)
                     logging.info(f"Checking simulation {sim_id} (attempt {info['attempts']}/{max_check_attempts}) for alpha: {info['alpha'][:50]}...")
-                    
+
                     # Handle rate limits
                     if sim_progress_resp.status_code == 429:
                         logging.info("Rate limit hit, will retry later")
                         continue
-                        
+
                     # Handle simulation limits
                     if "SIMULATION_LIMIT_EXCEEDED" in sim_progress_resp.text:
                         logging.info(f"Simulation limit exceeded for alpha: {info['alpha']}")
                         retry_queue.append((info['alpha'], sim_id))
                         continue
-                        
-                    # Handle retry-after
-                    retry_after = sim_progress_resp.headers.get("Retry-After")
-                    if retry_after:
-                        try:
-                            wait_time = int(float(retry_after))  # Handle decimal values like "2.5"
-                            logging.info(f"Need to wait {wait_time}s before next check")
-                            time.sleep(wait_time)
-                        except (ValueError, TypeError):
-                            logging.warning(f"Invalid Retry-After header: {retry_after}, using default 5s")
-                            time.sleep(5)
+
+                    # 解析响应内容
+                    try:
+                        sim_result = sim_progress_resp.json()
+                    except Exception as json_err:
+                        logging.warning(f"Failed to parse simulation response: {json_err}")
                         continue
-                    
-                    sim_result = sim_progress_resp.json()
+
+                    # 检查进度（如果只有 progress 字段，说明还在运行）
+                    progress = sim_result.get("progress")
                     status = sim_result.get("status")
-                    logging.info(f"Simulation {sim_id} status: {status}")
-                    
+
+                    # 如果有 progress 但没有 status，说明模拟还在运行中
+                    if progress is not None and status is None:
+                        logging.info(f"Simulation {sim_id} progress: {progress*100:.1f}% - URL: {info['progress_url']}")
+                        # 等待 Retry-After 时间后继续检查
+                        retry_after = sim_progress_resp.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                wait_time = int(float(retry_after))
+                                logging.info(f"Waiting {wait_time}s for simulation to complete...")
+                                time.sleep(wait_time)
+                            except (ValueError, TypeError):
+                                time.sleep(5)
+                        continue
+
+                    logging.info(f"Simulation {sim_id} status: {status} - URL: {info['progress_url']}")
+
                     # Log additional details for debugging
                     if status == "PENDING":
-                        logging.debug(f"Simulation {sim_id} still pending...")
+                        logging.debug(f"Simulation {sim_id} is pending...")
                     elif status == "RUNNING":
                         logging.debug(f"Simulation {sim_id} is running...")
                     elif status not in ["COMPLETE", "ERROR"]:
-                        logging.warning(f"Simulation {sim_id} has unknown status: {status}")
-                    
+                        logging.warning(f"Simulation {sim_id} has unknown status: {status} - URL: {info['progress_url']}")
+
                     if status == "COMPLETE":
                         alpha_id = sim_result.get("alpha")
                         if alpha_id:
-                            alpha_resp = self.sess.get(f'https://api.worldquantbrain.com/alphas/{alpha_id}')
+                            alpha_resp = self.sess.get(f'https://api.worldquantbrain.com/alphas/{alpha_id}', timeout=30)
                             if alpha_resp.status_code == 200:
                                 alpha_data = alpha_resp.json()
                                 fitness = alpha_data.get("is", {}).get("fitness")
                                 logging.info(f"Alpha {alpha_id} completed with fitness: {fitness}")
-                                
+
                                 self.results.append({
                                     "alpha": info["alpha"],
                                     "result": sim_result,
                                     "alpha_data": alpha_data
                                 })
-                                
+
                                 # Check if fitness is not None and greater than threshold
                                 if fitness is not None and fitness > 0.5:
                                     logging.info(f"Found promising alpha! Fitness: {fitness}")
@@ -615,7 +991,16 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
                                 elif fitness is None:
                                     logging.warning(f"Alpha {alpha_id} has no fitness data, skipping hopeful alpha logging")
                     elif status == "ERROR":
+                        # 记录详细错误信息
+                        error_msg = sim_result.get("message", "Unknown error")
+                        error_location = sim_result.get("location", {})
                         logging.error(f"Simulation failed for alpha: {info['alpha']}")
+                        logging.error(f"  Error: {error_msg}")
+                        if error_location:
+                            logging.error(f"  Location: line {error_location.get('line')}, pos {error_location.get('start')}-{error_location.get('end')}")
+
+                        # 保存错误信息到文件，供后续分析和反馈给大模型
+                        self._log_simulation_error(info["alpha"], sim_result)
                     completed.append(sim_id)
                     
                 except Exception as e:
@@ -660,7 +1045,7 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
                 },
                 'regular': alpha_expression
             }
-            return self.sess.post('https://api.worldquantbrain.com/simulations', json=simulation_data)
+            return self.sess.post('https://api.worldquantbrain.com/simulations', json=simulation_data, timeout=60)
 
         try:
             sim_resp = submit_simulation()
@@ -681,10 +1066,14 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
             if not sim_progress_url:
                 return {"status": "error", "message": "No progress URL received"}
 
+            # 从 URL 中提取真实的模拟 ID
+            # URL 格式: https://api.worldquantbrain.com/simulations/{sim_id}
+            sim_id = sim_progress_url.rstrip('/').split('/')[-1]
+
             return {
-                "status": "success", 
+                "status": "success",
                 "result": {
-                    "id": f"{time.time()}_{random.random()}",
+                    "id": sim_id,
                     "progress_url": sim_progress_url
                 }
             }
@@ -696,7 +1085,7 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
     def log_hopeful_alpha(self, expression: str, alpha_data: Dict) -> None:
         """Log promising alphas to a JSON file."""
         log_file = 'hopeful_alphas.json'
-        
+
         # Load existing data
         existing_data = []
         if os.path.exists(log_file):
@@ -705,7 +1094,7 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
                     existing_data = json.load(f)
             except json.JSONDecodeError:
                 print(f"Warning: Could not parse {log_file}, starting fresh")
-        
+
         # Add new alpha with timestamp
         entry = {
             "expression": expression,  # Store just the expression string
@@ -718,14 +1107,60 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
             "grade": alpha_data.get("grade", "UNKNOWN"),
             "checks": alpha_data.get("is", {}).get("checks", [])
         }
-        
+
         existing_data.append(entry)
-        
+
         # Save updated data
         with open(log_file, 'w') as f:
             json.dump(existing_data, f, indent=2)
-        
+
         print(f"Logged promising alpha to {log_file}")
+
+    def _log_simulation_error(self, expression: str, error_result: Dict) -> None:
+        """记录模拟错误信息，供后续分析和反馈给大模型"""
+        log_file = 'simulation_errors.json'
+
+        # 加载现有数据
+        existing_data = []
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r') as f:
+                    existing_data = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                pass
+
+        # 构建错误条目
+        entry = {
+            "expression": expression,
+            "timestamp": int(time.time()),
+            "error_message": error_result.get("message", "Unknown error"),
+            "error_location": error_result.get("location", {}),
+            "help_link": error_result.get("links", {}).get("linkToCommonErrorMessages", ""),
+            "simulation_id": error_result.get("id", "")
+        }
+
+        existing_data.append(entry)
+
+        # 只保留最近 100 条错误记录
+        if len(existing_data) > 100:
+            existing_data = existing_data[-100:]
+
+        # 保存
+        with open(log_file, 'w') as f:
+            json.dump(existing_data, f, indent=2)
+
+        logging.info(f"Error logged to {log_file}")
+
+    def get_simulation_errors(self) -> List[Dict]:
+        """获取最近的模拟错误记录，供大模型参考"""
+        log_file = 'simulation_errors.json'
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r') as f:
+                    return json.load(f)
+            except:
+                return []
+        return []
 
     def get_results(self) -> List[Dict]:
         """Get all processed results including retried alphas."""
@@ -747,7 +1182,7 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
         
         for attempt in range(max_retries):
             try:
-                response = self.sess.get(url, params=params)
+                response = self.sess.get(url, params=params, timeout=30)
                 if response.status_code == 429:  # Too Many Requests
                     wait_time = int(response.headers.get('Retry-After', retry_delay))
                     logger.info(f"Rate limited. Waiting {wait_time} seconds before retry...")

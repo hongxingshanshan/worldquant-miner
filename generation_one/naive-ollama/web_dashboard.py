@@ -208,29 +208,47 @@ class AlphaDashboard:
         """Get statistics about generated alphas and results."""
         stats = {
             "total_alphas_generated": 0,
-            "successful_alphas": 0,
-            "failed_alphas": 0,
+            "simulations_completed": 0,
+            "quality_alphas": 0,  # fitness > 0.5
+            "failed_simulations": 0,
             "last_24h_generated": 0,
-            "last_24h_successful": 0
+            "last_24h_completed": 0,
+            "last_24h_quality": 0
         }
-        
+
         try:
             # Count files in results directory
             if os.path.exists(self.results_dir):
                 result_files = [f for f in os.listdir(self.results_dir) if f.endswith('.json')]
                 stats["total_alphas_generated"] = len(result_files)
-                
-                # Count successful alphas (files with content)
+
+                # Count simulations and quality alphas
                 for file in result_files:
                     file_path = os.path.join(self.results_dir, file)
                     try:
                         with open(file_path, 'r') as f:
                             data = json.load(f)
                             if data and len(data) > 0:
-                                stats["successful_alphas"] += 1
+                                stats["simulations_completed"] += 1
+                                # 检查 fitness
+                                if isinstance(data, list):
+                                    for item in data:
+                                        if isinstance(item, dict):
+                                            alpha_data = item.get("alpha_data", {})
+                                            fitness = alpha_data.get("is", {}).get("fitness")
+                                            if fitness is not None and fitness > 0.5:
+                                                stats["quality_alphas"] += 1
+                                                break  # 一个文件只计一次
+                                elif isinstance(data, dict):
+                                    alpha_data = data.get("alpha_data", {})
+                                    fitness = alpha_data.get("is", {}).get("fitness")
+                                    if fitness is not None and fitness > 0.5:
+                                        stats["quality_alphas"] += 1
+                            else:
+                                stats["failed_simulations"] += 1
                     except:
-                        stats["failed_alphas"] += 1
-                
+                        stats["failed_simulations"] += 1
+
                 # Count last 24 hours
                 cutoff_time = datetime.now() - timedelta(hours=24)
                 for file in result_files:
@@ -241,13 +259,27 @@ class AlphaDashboard:
                             with open(file_path, 'r') as f:
                                 data = json.load(f)
                                 if data and len(data) > 0:
-                                    stats["last_24h_successful"] += 1
+                                    stats["last_24h_completed"] += 1
+                                    # 检查 fitness
+                                    if isinstance(data, list):
+                                        for item in data:
+                                            if isinstance(item, dict):
+                                                alpha_data = item.get("alpha_data", {})
+                                                fitness = alpha_data.get("is", {}).get("fitness")
+                                                if fitness is not None and fitness > 0.5:
+                                                    stats["last_24h_quality"] += 1
+                                                    break
+                                    elif isinstance(data, dict):
+                                        alpha_data = data.get("alpha_data", {})
+                                        fitness = alpha_data.get("is", {}).get("fitness")
+                                        if fitness is not None and fitness > 0.5:
+                                            stats["last_24h_quality"] += 1
                         except:
                             pass
-                            
+
         except Exception as e:
             logger.warning(f"Could not get statistics: {e}")
-        
+
         return stats
     
     def get_logs(self, lines: int = 50) -> List[str]:
