@@ -64,3 +64,4 @@ build/
 *.zip
 
 QUANTAXIS
+hopeful_alphas.json

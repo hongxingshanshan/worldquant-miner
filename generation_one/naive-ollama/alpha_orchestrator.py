@@ -672,11 +672,13 @@ class AlphaOrchestrator:
 
         try:
             # Run the alpha submitter as a subprocess
+            # 增加超时时间：每个 alpha 最多 20 分钟监控 + 30 秒等待，批次间 120 秒
+            # 假设 batch_size=3，最多需要 3*(20*60+30) + 2*120 = 约 63 分钟
             result = subprocess.run([
                 sys.executable, 'improved_alpha_submitter.py',
                 '--batch-size', str(batch_size)
-            ], capture_output=True, text=True, timeout=600)
-            
+            ], capture_output=True, text=True, timeout=5400)  # 90 分钟超时
+
             if result.returncode == 0:
                 logger.info("Successfully completed alpha submission")
                 # Update submission date
@@ -684,9 +686,9 @@ class AlphaOrchestrator:
                 self.save_submission_history()
             else:
                 logger.error(f"Alpha submission failed: {result.stderr}")
-                
+
         except subprocess.TimeoutExpired:
-            logger.error("Alpha submission timed out")
+            logger.error("Alpha submission timed out after 90 minutes")
         except Exception as e:
             logger.error(f"Error running alpha submitter: {e}")
 
