@@ -8,15 +8,15 @@ import os
 import sys
 import time
 import json
-import logging
 from alpha_orchestrator import AlphaOrchestrator
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 def create_test_hopeful_alphas():
     """Create a test hopeful_alphas.json file for testing."""

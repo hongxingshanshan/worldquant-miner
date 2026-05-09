@@ -3,11 +3,16 @@
 """
 import json
 import os
-import logging
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
-logger = logging.getLogger(__name__)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 @dataclass
 class ModelInfo:

@@ -6,10 +6,8 @@ import subprocess
 import threading
 import queue
 from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
 import requests
-import logging
-import logging.handlers
-from typing import Dict, List, Optional
 import sys
 import ctypes
 import signal
@@ -19,31 +17,38 @@ from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
 
-# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
-log_queue = queue.Queue(-1)
-queue_handler = logging.handlers.QueueHandler(log_queue)
-
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.INFO)
-stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
-queue_listener = logging.handlers.QueueListener(log_queue, stream_handler)
-queue_listener.start()
-
-logger = logging.getLogger('web_dashboard')
-logger.setLevel(logging.INFO)
-logger.addHandler(queue_handler)
-logger.propagate = False
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 class AlphaDashboard:
     def __init__(self):
         self.status_file = "dashboard_status.json"
-        self.log_file = "alpha_orchestrator.log"
+        self.log_file = "alpha_mining.log"  # 统一日志文件
         self.submission_log_file = "submission_log.json"
         self.results_dir = "results"
         self.logs_dir = "logs"
         self.credentials_path = "credential.txt"
         self.sess = None  # WorldQuant API session
+        self.optimizer = None  # 延迟初始化
+
+    def _load_config(self) -> Dict:
+        """加载配置文件"""
+        config_file = "config.json"
+        default_config = {"model": "qwen2.5:14b"}
+
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"加载配置文件失败: {e}")
+
+        return default_config
         
     def get_system_status(self) -> Dict:
         """Get overall system status."""
@@ -314,23 +319,17 @@ class AlphaDashboard:
         return [line.strip() for line in logs if line.strip()]
 
     def get_alpha_generator_logs(self, lines: int = 50) -> List[str]:
-        """Get alpha generator specific logs."""
+        """Get alpha generator specific logs from unified log file."""
         logs = []
-        alpha_log_file = "alpha_generator_ollama.log"
         try:
-            # Read from alpha generator log file
-            if os.path.exists(alpha_log_file):
-                with open(alpha_log_file, 'r', encoding='utf-8') as f:
+            if os.path.exists(self.log_file):
+                with open(self.log_file, 'r', encoding='utf-8') as f:
                     all_logs = f.readlines()
-                    # Filter for alpha generator related logs
+                    # Filter for alpha generator/optimizer related logs by module name
                     alpha_logs = []
                     for line in all_logs:
-                        line_lower = line.lower()
-                        if any(keyword in line_lower for keyword in [
-                            'alpha', 'generator', 'generating', 'ollama', 'model', 'prompt',
-                            'response', 'idea', 'factor', 'worldquant', 'submission',
-                            'batch', 'simulation', 'fitness'
-                        ]):
+                        # 日志格式: [模块名:文件名:行号]
+                        if any(module in line for module in ['alpha_generator', 'alpha_optimizer', 'llm_client']):
                             alpha_logs.append(line)
                     logs = alpha_logs[-lines:] if len(alpha_logs) > lines else alpha_logs
         except Exception as e:
@@ -499,6 +498,7 @@ class AlphaDashboard:
             "id": data.get("id", ""),
             "类型": data.get("type", ""),
             "状态": status_map.get(data.get("status", ""), data.get("status", "未知")),
+            "原始状态": data.get("status", ""),
             "表达式": data.get("regular", ""),
             "alpha_id": data.get("alpha", ""),
             "设置": {
@@ -511,6 +511,22 @@ class AlphaDashboard:
                 "截断": data.get("settings", {}).get("truncation", ""),
             }
         }
+
+        # 添加错误信息（如果有）
+        if data.get("status") in ["ERROR", "FAIL"]:
+            formatted["错误信息"] = data.get("message", "")
+            # 添加参考链接
+            links = data.get("links", {})
+            if links:
+                formatted["参考链接"] = links
+            # 添加错误位置
+            location = data.get("location", {})
+            if location:
+                formatted["错误位置"] = {
+                    "行": location.get("line"),
+                    "起始": location.get("start"),
+                    "结束": location.get("end"),
+                }
 
         return formatted
 
@@ -597,6 +613,125 @@ class AlphaDashboard:
         }
         return translations.get(name, name)
 
+    def get_failed_alphas(self, limit: int = 20) -> List[Dict]:
+        """获取未通过检查的 Alpha 列表"""
+        failed_alphas = []
+
+        try:
+            sess = self._get_wq_session()
+            if sess is None:
+                logger.warning("无法连接到 WorldQuant Brain API")
+                return failed_alphas
+
+            # 获取用户的 Alpha 列表，按 Sharpe 倒序排序
+            response = sess.get(
+                'https://api.worldquantbrain.com/users/self/alphas',
+                params={
+                    'limit': limit * 2,
+                    'offset': 0,
+                    'order': '-is.sharpe',
+                    'hidden': 'false'
+                },
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                alphas = data.get('results', [])
+
+                for alpha in alphas:
+                    is_data = alpha.get('is', {})
+                    checks = is_data.get('checks', [])
+                    status = alpha.get('status', '')
+
+                    # 找出未通过的检查项
+                    failed_checks = [c for c in checks if c.get('result') == 'FAIL']
+
+                    # 判断是否可提交：status 不是 UNSUBMITTED 且所有检查通过
+                    is_submittable = status != 'UNSUBMITTED' and all(
+                        c.get('result') == 'PASS'
+                        for c in checks
+                    )
+
+                    # 只保留未通过的 Alpha
+                    if not is_submittable or failed_checks:
+                        expression = alpha.get('regular', {}).get('code', '').strip()
+
+                        alpha_info = {
+                            "id": alpha.get('id', ''),
+                            "expression": expression,
+                            "sharpe": is_data.get('sharpe'),
+                            "fitness": is_data.get('fitness'),
+                            "turnover": is_data.get('turnover'),
+                            "status": status,
+                            "grade": alpha.get('grade', ''),
+                            "date_created": alpha.get('dateCreated', ''),
+                            "failed_checks": [self._translate_check_name(c.get('name', '')) for c in failed_checks],
+                            "is_submittable": is_submittable
+                        }
+                        failed_alphas.append(alpha_info)
+
+                        if len(failed_alphas) >= limit:
+                            break
+
+            else:
+                logger.warning(f"获取 Alpha 列表失败: {response.status_code}")
+
+        except requests.exceptions.Timeout:
+            logger.error("获取失败 Alpha 列表超时")
+        except Exception as e:
+            logger.error(f"获取失败 Alpha 列表异常: {e}")
+
+        return failed_alphas
+
+    def optimize_alpha_by_id(self, alpha_id: str) -> Dict:
+        """根据 Alpha ID 优化并提交 Alpha"""
+        result = {
+            "success": False,
+            "original": None,
+            "optimized": None,
+            "failure_type": None,
+            "task_id": None,
+            "error": None
+        }
+
+        try:
+            # 检查是否有可用的优化器
+            if self.optimizer is None:
+                # 延迟初始化优化器
+                from alpha_optimizer import AlphaOptimizer
+                from alpha_generator_ollama import AlphaGenerator
+
+                # 创建 LLM 客户端
+                generator = AlphaGenerator()
+                self.optimizer = AlphaOptimizer(
+                    llm_client=generator.llm_client,
+                    wq_client=generator
+                )
+
+            # 调用优化并提交方法
+            opt_result = self.optimizer.optimize_and_submit(alpha_id)
+
+            if opt_result.get("success"):
+                result["success"] = True
+                result["original"] = opt_result.get("original")
+                result["optimized"] = opt_result.get("optimized")
+                result["failure_type"] = opt_result.get("failure_type")
+                result["simulation_id"] = opt_result.get("simulation_id")
+                result["alpha_id"] = alpha_id
+                result["message"] = opt_result.get("message", "优化成功，已提交模拟测试")
+            else:
+                result["error"] = opt_result.get("error", "优化失败")
+                result["alpha_id"] = alpha_id
+                result["original"] = opt_result.get("original")
+                result["optimized"] = opt_result.get("optimized")
+
+        except Exception as e:
+            logger.error(f"优化 Alpha {alpha_id} 失败: {e}")
+            result["error"] = str(e)
+
+        return result
+
 # Global dashboard instance
 dashboard = AlphaDashboard()
 
@@ -654,6 +789,17 @@ def api_simulation_status(sim_id):
 def api_alpha_details(alpha_id):
     """API endpoint to get alpha details."""
     return jsonify(dashboard.get_alpha_details(alpha_id))
+
+@app.route('/api/optimize-alpha/<alpha_id>', methods=['POST'])
+def api_optimize_alpha(alpha_id):
+    """API endpoint to optimize alpha by ID."""
+    return jsonify(dashboard.optimize_alpha_by_id(alpha_id))
+
+@app.route('/api/failed-alphas')
+def api_failed_alphas():
+    """API endpoint to get failed alphas list."""
+    limit = request.args.get('limit', 20, type=int)
+    return jsonify({"alphas": dashboard.get_failed_alphas(limit)})
 
 def setup_cleanup_handler():
     """设置 Windows 控制台关闭事件处理器"""

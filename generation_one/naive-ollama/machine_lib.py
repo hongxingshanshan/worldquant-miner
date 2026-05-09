@@ -10,8 +10,15 @@ from itertools import product
 from itertools import combinations
 from collections import defaultdict
 import pickle
-import logging
 import re
+
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 arsenal = ["ts_moment", "ts_entropy", "ts_min_max_cps", "ts_min_max_diff", "inst_tvr", 'sigmoid', 
            "ts_decay_exp_window", "ts_percentage", "vector_neut", "vector_proj", "signed_power"]
@@ -38,7 +45,7 @@ class WorldQuantBrain:
 
     def login(self):
         """Initialize or refresh session with WorldQuant Brain."""
-        logging.info("Authenticating with WorldQuant Brain...")
+        logger.info("Authenticating with WorldQuant Brain...")
         self.session = requests.Session()
         self.session.auth = (self.username, self.password)
         response = self.session.post('https://api.worldquantbrain.com/authentication')
@@ -50,7 +57,7 @@ class WorldQuantBrain:
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         })
-        logging.info("Authentication successful")
+        logger.info("Authentication successful")
         return self.session
 
     def _extract_inaccessible_operator(self, error_message: str) -> str:
@@ -64,13 +71,13 @@ class WorldQuantBrain:
         """Check if alpha expression contains any inaccessible operators."""
         for op in self.inaccessible_ops:
             if op in alpha:
-                logging.warning(f"Skipping alpha with inaccessible operator '{op}': {alpha}")
+                logger.warning(f"Skipping alpha with inaccessible operator '{op}': {alpha}")
                 return True
         return False
 
     def single_simulate(self, alpha_data: list, neut: str, region: str, universe: str) -> dict:
         """Run a single alpha simulation."""
-        logging.info(f"Starting single simulation for alpha")
+        logger.info(f"Starting single simulation for alpha")
         
         sim_data_list = self.generate_sim_data(alpha_data, region, universe, neut)
         results = []
@@ -84,18 +91,18 @@ class WorldQuantBrain:
                 simulation_response = self.session.post('https://api.worldquantbrain.com/simulations', 
                                                      json=sim_data)
                 if simulation_response.status_code == 401:
-                    logging.info("Session expired, re-authenticating...")
+                    logger.info("Session expired, re-authenticating...")
                     self.login()
                     simulation_response = self.session.post('https://api.worldquantbrain.com/simulations', 
                                                         json=sim_data)
                 
                 if simulation_response.status_code != 201:
-                    logging.error(f"Simulation API error: {simulation_response.text}")
+                    logger.error(f"Simulation API error: {simulation_response.text}")
                     continue
                     
                 simulation_progress_url = simulation_response.headers.get('Location')
                 if not simulation_progress_url:
-                    logging.error("No Location header in response")
+                    logger.error("No Location header in response")
                     continue
                 
                 # Monitor this single simulation
@@ -104,7 +111,7 @@ class WorldQuantBrain:
                     results.append(result)
                     
             except Exception as e:
-                logging.error(f"Error in simulation: {str(e)}")
+                logger.error(f"Error in simulation: {str(e)}")
                 sleep(60)  # Short sleep on error
                 self.login()
                 continue
@@ -121,18 +128,18 @@ class WorldQuantBrain:
                 if not retry_after:
                     result = simulation_progress.json()
                     status = result.get("status")
-                    logging.info(f"Simulation status: {status}")
+                    logger.info(f"Simulation status: {status}")
                     
                     if status == "COMPLETE":
                         return result
                     elif status in ["FAILED", "ERROR"]:
                         error_message = result.get("message", "")
-                        logging.error(f"Simulation failed: {result}")
+                        logger.error(f"Simulation failed: {result}")
                         
                         # Check if error is due to inaccessible operator
                         inaccessible_op = self._extract_inaccessible_operator(error_message)
                         if inaccessible_op and inaccessible_op not in self.inaccessible_ops:
-                            logging.info(f"Adding new inaccessible operator: {inaccessible_op}")
+                            logger.info(f"Adding new inaccessible operator: {inaccessible_op}")
                             self.inaccessible_ops.append(inaccessible_op)
                         
                         return None
@@ -142,7 +149,7 @@ class WorldQuantBrain:
                 sleep(float(retry_after))
                 
         except Exception as e:
-            logging.error(f"Error monitoring progress: {str(e)}")
+            logger.error(f"Error monitoring progress: {str(e)}")
             return None
 
     def generate_sim_data(self, alpha_list, region, uni, neut):
@@ -892,5 +899,5 @@ class WorldQuantBrain:
         if current_pool:
             pools.append(current_pool)
         
-        logging.info(f"Created {len(pools)} pools with {batch_size} alphas per batch")
+        logger.info(f"Created {len(pools)} pools with {batch_size} alphas per batch")
         return pools

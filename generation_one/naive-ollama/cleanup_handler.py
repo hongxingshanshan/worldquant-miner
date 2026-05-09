@@ -5,13 +5,18 @@ Windows 控制台关闭事件处理器工具
 """
 
 import sys
-import logging
 import ctypes
 import signal
 import atexit
 from typing import Callable, Optional
 
-logger = logging.getLogger(__name__)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 
 class WindowsCleanupHandler:

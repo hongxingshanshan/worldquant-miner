@@ -31,6 +31,13 @@
     "mining_interval_hours": 6,
     "sleep_time": 30
   },
+  "optimization": {
+    "enabled": true,
+    "min_sharpe": 1.0,
+    "optimize_per_cycle": 5,
+    "generate_per_cycle": 5,
+    "temperature": 0.5
+  },
   "simulation": {
     "instrument_type": "EQUITY",
     "region": "USA",

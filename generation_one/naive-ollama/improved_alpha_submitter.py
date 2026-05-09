@@ -1,35 +1,20 @@
 import requests
 import json
-import logging
-import logging.handlers
 import time
 import os
-import queue
 from requests.auth import HTTPBasicAuth
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import argparse
 from datetime import datetime, timedelta
 
-# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
-log_queue = queue.Queue(-1)
-queue_handler = logging.handlers.QueueHandler(log_queue)
-
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.INFO)
-stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
-file_handler = logging.FileHandler('improved_alpha_submitter.log', mode='a', encoding='utf-8')
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
-queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
-queue_listener.start()
-
-logger = logging.getLogger('improved_alpha_submitter')
-logger.setLevel(logging.INFO)
-logger.addHandler(queue_handler)
-logger.propagate = False
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 class ImprovedAlphaSubmitter:
     def __init__(self, credentials_path: str):
@@ -566,11 +551,9 @@ def main():
             
     except KeyboardInterrupt:
         logger.info("Received shutdown signal, exiting gracefully...")
-        queue_listener.stop()
         return 0
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
-        queue_listener.stop()
         return 1
 
 if __name__ == "__main__":

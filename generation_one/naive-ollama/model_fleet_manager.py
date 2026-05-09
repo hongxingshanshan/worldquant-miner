@@ -5,7 +5,6 @@ Automatically manages model hierarchy and downgrades when VRAM issues occur.
 """
 
 import json
-import logging
 import subprocess
 import time
 import os
@@ -19,16 +18,13 @@ try:
 except ImportError:
     CONFIG_AVAILABLE = False
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('model_fleet.log')
-    ]
-)
-logger = logging.getLogger(__name__)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 @dataclass
 class ModelInfo:

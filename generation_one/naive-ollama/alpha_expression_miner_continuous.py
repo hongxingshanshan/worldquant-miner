@@ -2,21 +2,17 @@
 
 import json
 import time
-import logging
 import argparse
 import os
 from alpha_expression_miner import AlphaExpressionMiner
+import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('alpha_expression_miner_continuous.log'),
-        logging.StreamHandler()
-    ]
-)
-
-logger = logging.getLogger(__name__)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 class ContinuousAlphaExpressionMiner:
     def __init__(self, credentials_path, ollama_url=None, mining_interval=6):

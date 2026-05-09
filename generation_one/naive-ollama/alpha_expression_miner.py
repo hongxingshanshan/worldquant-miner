@@ -9,16 +9,12 @@ from typing import List, Dict, Tuple
 import time
 import logging
 
-# Configure logging at the top of the file
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('alpha_miner.log')
-    ]
-)
-logger = logging.getLogger(__name__)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 class AlphaExpressionMiner:
     def __init__(self, credentials_path: str):

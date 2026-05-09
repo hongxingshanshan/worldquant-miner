@@ -1,21 +1,19 @@
 import machine_lib as ml
 from time import sleep
 import time
-import logging
 import json
 import os
 from itertools import product
 import requests
 import argparse
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('machine_mining.log'),
-        logging.StreamHandler()
-    ]
-)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 class MachineMiner:
     def __init__(self, username: str, password: str):

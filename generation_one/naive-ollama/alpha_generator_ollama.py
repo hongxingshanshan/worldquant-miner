@@ -18,6 +18,7 @@ import ctypes
 import signal
 import atexit
 import queue
+import logging
 
 # 尝试导入配置管理器
 try:
@@ -33,31 +34,20 @@ try:
 except ImportError:
     LLM_CLIENT_AVAILABLE = False
 
-# 使用 QueueHandler 和 QueueListener 模式，避免多线程 logging 死锁
-# 创建日志队列
-log_queue = queue.Queue(-1)  # 无限大小
+# 尝试导入优化器和队列
+try:
+    from alpha_optimizer import AlphaOptimizer
+    from alpha_queue import AlphaQueue
+    OPTIMIZER_AVAILABLE = True
+except ImportError:
+    OPTIMIZER_AVAILABLE = False
 
-# 创建 QueueHandler
-queue_handler = logging.handlers.QueueHandler(log_queue)
-
-# 创建实际的 handlers
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.INFO)
-stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
-file_handler = logging.FileHandler('alpha_generator_ollama.log', mode='a', encoding='utf-8')
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
-# 创建 QueueListener（在主线程启动）
-queue_listener = logging.handlers.QueueListener(log_queue, stream_handler, file_handler)
-queue_listener.start()
-
-# 创建 logger 并添加 QueueHandler
-logger = logging.getLogger('alpha_generator')
-logger.setLevel(logging.INFO)
-logger.addHandler(queue_handler)
-logger.propagate = False  # 不传播到 root logger
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 # 知识库路径（统一存放在项目根目录的 knowledge_base 文件夹）
 KNOWLEDGE_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -373,7 +363,7 @@ class RetryQueue:
             time.sleep(1)  # Prevent busy waiting
 
 class AlphaGenerator:
-    def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434", max_concurrent: int = 2, config_path: str = "config.json"):
+    def __init__(self, credentials_path: str = "credential.txt", ollama_url: str = "http://localhost:11434", max_concurrent: int = 2, config_path: str = "config.json"):
         self.sess = requests.Session()
         self.credentials_path = credentials_path  # Store path for reauth
         self.setup_auth(credentials_path)
@@ -395,6 +385,20 @@ class AlphaGenerator:
                 logger.info(f"LLM 客户端初始化成功 - 提供商: {self.llm_client.get_provider()}, 模型: {self.llm_client.get_model_name()}")
             except Exception as e:
                 logger.warning(f"LLM 客户端初始化失败: {e}")
+
+        # 初始化优化器和队列
+        self.optimizer = None
+        self.alpha_queue = None
+        self.optimization_enabled = False
+        if OPTIMIZER_AVAILABLE and self.llm_client:
+            try:
+                self.optimizer = AlphaOptimizer(self.llm_client)
+                self.alpha_queue = AlphaQueue()
+                # 从配置加载优化设置
+                self._load_optimization_config()
+                logger.info(f"优化器初始化成功 - 启用: {self.optimization_enabled}")
+            except Exception as e:
+                logger.warning(f"优化器初始化失败: {e}")
 
         # 从配置文件加载模型舰队
         self.model_fleet = self._load_model_fleet()
@@ -427,6 +431,32 @@ class AlphaGenerator:
         # 使用默认值
         logger.info("使用默认模型舰队配置")
         return ['llama3:8b', 'qwen2.5-coder:1.5b']
+
+    def _load_optimization_config(self):
+        """加载优化配置"""
+        # 默认配置
+        self.optimization_config = {
+            'enabled': True,
+            'min_sharpe': 1.0,
+            'optimize_per_cycle': 5,
+            'generate_per_cycle': 5,
+            'temperature': 0.5
+        }
+
+        # 从配置文件加载
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    opt_config = data.get('optimization', {})
+                    if opt_config:
+                        self.optimization_config.update(opt_config)
+            except Exception as e:
+                logger.warning(f"加载优化配置失败: {e}")
+
+        self.optimization_enabled = self.optimization_config.get('enabled', True)
+        logger.info(f"优化配置: {self.optimization_config}")
+
         
     def setup_auth(self, credentials_path: str) -> None:
         """Set up authentication with WorldQuant Brain."""
@@ -843,41 +873,88 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
         
         logging.info(f"Successfully downgraded to {new_model}")
 
-    def test_alpha_batch(self, alphas: List[str]) -> None:
-        """Submit a batch of alphas for testing with monitoring, respecting concurrent limits."""
-        logging.info(f"Starting batch test of {len(alphas)} alphas")
-        for alpha in alphas:
-            logging.info(f"Alpha expression: {alpha}")
-        
-        # Submit alphas in smaller chunks to respect concurrent limits
+    def test_alpha_batch(self, alphas: List[str] = None) -> int:
+        """
+        提交一批 Alpha 进行测试，同时处理队列中的 Alpha
+
+        Args:
+            alphas: 可选的 Alpha 列表（如果不提供，则从队列获取）
+
+        Returns:
+            成功提交的数量
+        """
+        # 收集所有待测试的 Alpha
+        all_alphas_data = []
+
+        # 1. 从队列获取待测试的 Alpha（包括生成的和优化的）
+        if self.alpha_queue:
+            batch_from_queue = self.alpha_queue.get_next_batch(batch_size=20)
+            for item in batch_from_queue:
+                all_alphas_data.append({
+                    "expression": item["expression"],
+                    "source": item["source"],
+                    "original_alpha": item.get("original_alpha"),
+                    "opt_type": item.get("optimization_type"),
+                    "queue_item": item
+                })
+            if batch_from_queue:
+                logger.info(f"从队列获取 {len(batch_from_queue)} 个 Alpha 待测试")
+
+        # 2. 添加传入的 Alpha（标记为 generated）
+        if alphas:
+            for alpha in alphas:
+                all_alphas_data.append({
+                    "expression": alpha,
+                    "source": "generated",
+                    "original_alpha": None,
+                    "opt_type": None,
+                    "queue_item": None
+                })
+
+        if not all_alphas_data:
+            logger.info("没有待测试的 Alpha")
+            return 0
+
+        logger.info(f"开始批量测试 {len(all_alphas_data)} 个 Alpha (队列: {sum(1 for a in all_alphas_data if a['queue_item'])}, 新生成: {sum(1 for a in all_alphas_data if not a['queue_item'])})")
+
+        # 提交测试
         max_concurrent = self.executor._max_workers
         submitted = 0
         queued = 0
-        
-        for i in range(0, len(alphas), max_concurrent):
-            chunk = alphas[i:i + max_concurrent]
-            logging.info(f"Submitting chunk {i//max_concurrent + 1}/{(len(alphas)-1)//max_concurrent + 1} ({len(chunk)} alphas)")
-            
-            # Submit chunk
+
+        for i in range(0, len(all_alphas_data), max_concurrent):
+            chunk = all_alphas_data[i:i + max_concurrent]
+            logger.info(f"提交批次 {i//max_concurrent + 1}/{(len(all_alphas_data)-1)//max_concurrent + 1} ({len(chunk)} 个)")
+
+            # 提交批次
             futures = []
-            for j, alpha in enumerate(chunk, 1):
-                logging.info(f"Submitting alpha {i+j}/{len(alphas)}")
+            for j, alpha_data in enumerate(chunk, 1):
+                alpha = alpha_data["expression"]
+                logger.info(f"提交 Alpha {i+j}/{len(all_alphas_data)} [{alpha_data['source']}]: {alpha[:50]}...")
                 future = self.executor.submit(self._test_alpha_impl, alpha)
-                futures.append((alpha, future))
-            
-            # Process results for this chunk
-            for alpha, future in futures:
+                futures.append((alpha_data, future))
+
+            # 处理结果
+            for alpha_data, future in futures:
+                alpha = alpha_data["expression"]
                 try:
                     result = future.result()
                     if result.get("status") == "error":
                         if "SIMULATION_LIMIT_EXCEEDED" in result.get("message", ""):
                             self.retry_queue.add(alpha)
                             queued += 1
-                            logging.info(f"Queued for retry: {alpha}")
+                            logger.info(f"加入重试队列: {alpha}")
                         else:
-                            logging.error(f"Simulation error for {alpha}: {result.get('message')}")
+                            logger.error(f"模拟错误 {alpha}: {result.get('message')}")
+
+                            # 记录失败到队列
+                            if alpha_data["queue_item"] and self.alpha_queue:
+                                self.alpha_queue.record_result(alpha_data["queue_item"], {
+                                    "passed": False,
+                                    "error": result.get("message")
+                                })
                         continue
-                        
+
                     sim_id = result.get("result", {}).get("id")
                     progress_url = result.get("result", {}).get("progress_url")
                     if sim_id and progress_url:
@@ -885,39 +962,42 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
                             "alpha": alpha,
                             "progress_url": progress_url,
                             "status": "pending",
-                            "attempts": 0
+                            "attempts": 0,
+                            "source": alpha_data["source"],
+                            "original_alpha": alpha_data.get("original_alpha"),
+                            "opt_type": alpha_data.get("opt_type"),
+                            "queue_item": alpha_data.get("queue_item")
                         }
                         submitted += 1
-                        logging.info(f"Successfully submitted {alpha} (ID: {sim_id})")
-                        
+                        logger.info(f"成功提交 {alpha} (ID: {sim_id}) [{alpha_data['source']}]")
+
                 except Exception as e:
-                    logging.error(f"Error submitting alpha {alpha}: {str(e)}")
-            
-            # Wait between chunks to avoid overwhelming the API
-            if i + max_concurrent < len(alphas):
-                logging.info(f"Waiting 10 seconds before next chunk...")
+                    logger.error(f"提交 Alpha 错误 {alpha}: {str(e)}")
+
+            # 批次间等待
+            if i + max_concurrent < len(all_alphas_data):
+                logger.info(f"等待 10 秒后继续...")
                 sleep(10)
-        
-        logging.info(f"Batch submission complete: {submitted} submitted, {queued} queued for retry")
-        
-        # Monitor progress until all complete or need retry
+
+        logger.info(f"批量提交完成: {submitted} 已提交, {queued} 加入重试队列")
+
+        # 监控进度直到完成
         total_successful = 0
-        max_monitoring_time = 3600  # 1 hour maximum monitoring time
+        max_monitoring_time = 3600  # 1 小时最大监控时间
         start_time = time.time()
-        
+
         while self.pending_results:
-            # Check for timeout
             if time.time() - start_time > max_monitoring_time:
-                logging.warning(f"Monitoring timeout reached ({max_monitoring_time}s), stopping monitoring")
-                logging.warning(f"Remaining pending simulations: {list(self.pending_results.keys())}")
+                logger.warning(f"监控超时 ({max_monitoring_time}s)，停止监控")
+                logger.warning(f"剩余待处理模拟: {list(self.pending_results.keys())}")
                 break
-                
-            logging.info(f"Monitoring {len(self.pending_results)} pending simulations...")
-            completed = self.check_pending_results()
+
+            logger.info(f"监控 {len(self.pending_results)} 个待处理模拟...")
+            completed = self.check_pending_results_with_source()
             total_successful += completed
-            sleep(5)  # Wait between checks
-        
-        logging.info(f"Batch complete: {total_successful} successful simulations")
+            sleep(5)
+
+        logger.info(f"批量测试完成: {total_successful} 个成功")
         return total_successful
 
     def check_pending_results(self) -> int:
@@ -1040,6 +1120,143 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
             del self.pending_results[sim_id]
             self.retry_queue.add(alpha)
         
+        return successful
+
+    def check_pending_results_with_source(self) -> int:
+        """
+        检查待处理模拟结果，并记录来源信息到队列
+
+        Returns:
+            成功的 Alpha 数量
+        """
+        successful = 0
+        completed = []
+        retry_queue = []
+        max_check_attempts = 100
+
+        for sim_id, info in self.pending_results.items():
+            if info["status"] == "pending":
+                info["attempts"] = info.get("attempts", 0) + 1
+                if info["attempts"] > max_check_attempts:
+                    logger.warning(f"模拟 {sim_id} 超过最大检查次数 ({max_check_attempts})，标记为失败")
+                    completed.append(sim_id)
+                    continue
+
+                if "start_time" not in info:
+                    info["start_time"] = time.time()
+                elif time.time() - info["start_time"] > 1800:
+                    logger.warning(f"模拟 {sim_id} 等待时间过长，标记为失败")
+                    completed.append(sim_id)
+                    continue
+
+                try:
+                    sim_progress_resp = self.sess.get(info["progress_url"], timeout=30)
+                    source = info.get("source", "generated")
+                    logger.info(f"检查模拟 {sim_id} (尝试 {info['attempts']}/{max_check_attempts}) [{source}]: {info['alpha'][:50]}...")
+
+                    if sim_progress_resp.status_code == 429:
+                        logger.info("触发限流，稍后重试")
+                        continue
+
+                    if "SIMULATION_LIMIT_EXCEEDED" in sim_progress_resp.text:
+                        logger.info(f"模拟次数超限: {info['alpha']}")
+                        retry_queue.append((info['alpha'], sim_id))
+                        continue
+
+                    try:
+                        sim_result = sim_progress_resp.json()
+                    except Exception as json_err:
+                        logger.warning(f"解析模拟响应失败: {json_err}")
+                        continue
+
+                    progress = sim_result.get("progress")
+                    status = sim_result.get("status")
+
+                    if progress is not None and status is None:
+                        logger.info(f"模拟 {sim_id} 进度: {progress*100:.1f}%")
+                        retry_after = sim_progress_resp.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                wait_time = int(float(retry_after))
+                                logger.info(f"等待 {wait_time}s...")
+                                time.sleep(wait_time)
+                            except (ValueError, TypeError):
+                                time.sleep(5)
+                        continue
+
+                    logger.info(f"模拟 {sim_id} 状态: {status}")
+
+                    if status == "COMPLETE":
+                        alpha_id = sim_result.get("alpha")
+                        if alpha_id:
+                            alpha_resp = self.sess.get(f'https://api.worldquantbrain.com/alphas/{alpha_id}', timeout=30)
+                            if alpha_resp.status_code == 200:
+                                alpha_data = alpha_resp.json()
+                                fitness = alpha_data.get("is", {}).get("fitness")
+                                sharpe = alpha_data.get("is", {}).get("sharpe", 0)
+                                is_submittable = alpha_data.get("is_submittable", False)
+
+                                logger.info(f"Alpha {alpha_id} 完成 [{source}] - Fitness: {fitness}, Sharpe: {sharpe}")
+
+                                # 记录结果
+                                result_entry = {
+                                    "alpha": info["alpha"],
+                                    "result": sim_result,
+                                    "alpha_data": alpha_data,
+                                    "source": source,
+                                    "original_alpha": info.get("original_alpha"),
+                                    "opt_type": info.get("opt_type")
+                                }
+                                self.results.append(result_entry)
+
+                                # 记录到队列
+                                if info.get("queue_item") and self.alpha_queue:
+                                    self.alpha_queue.record_result(info["queue_item"], {
+                                        "passed": is_submittable or (fitness is not None and fitness > 0.5),
+                                        "sharpe": sharpe,
+                                        "fitness": fitness,
+                                        "alpha_id": alpha_id
+                                    })
+
+                                # 检查是否为有潜力的 Alpha
+                                if fitness is not None and fitness > 0.5:
+                                    logger.info(f"发现潜力 Alpha! [{source}] Fitness: {fitness}")
+                                    self.log_hopeful_alpha(info["alpha"], alpha_data)
+                                    successful += 1
+                                elif fitness is None:
+                                    logger.warning(f"Alpha {alpha_id} 没有 fitness 数据")
+
+                    elif status == "ERROR":
+                        error_msg = sim_result.get("message", "Unknown error")
+                        error_location = sim_result.get("location", {})
+                        logger.error(f"模拟失败 [{source}]: {info['alpha']}")
+                        logger.error(f"  错误: {error_msg}")
+                        if error_location:
+                            logger.error(f"  位置: line {error_location.get('line')}")
+
+                        # 记录失败到队列
+                        if info.get("queue_item") and self.alpha_queue:
+                            self.alpha_queue.record_result(info["queue_item"], {
+                                "passed": False,
+                                "error": error_msg
+                            })
+
+                        self._log_simulation_error(info["alpha"], sim_result)
+
+                    completed.append(sim_id)
+
+                except Exception as e:
+                    logger.error(f"检查结果错误 {sim_id}: {str(e)}")
+
+        # 移除已完成的模拟
+        for sim_id in completed:
+            del self.pending_results[sim_id]
+
+        # 重试失败的模拟
+        for alpha, sim_id in retry_queue:
+            del self.pending_results[sim_id]
+            self.retry_queue.add(alpha)
+
         return successful
 
     def test_alpha(self, alpha: str) -> Dict:
@@ -1211,6 +1428,198 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
         """Get all processed results including retried alphas."""
         return self.results
 
+    def optimize_failed_alphas(self) -> List[Dict]:
+        """
+        优化失败的 Alpha
+
+        Returns:
+            优化结果列表
+        """
+        if not self.optimizer or not self.optimization_enabled:
+            logger.info("优化功能未启用")
+            return []
+
+        # 设置 WorldQuant 客户端给优化器
+        self.optimizer.set_wq_client(self)
+
+        # 获取优化配置
+        min_sharpe = self.optimization_config.get('min_sharpe', 1.0)
+        top_n = self.optimization_config.get('optimize_per_cycle', 5)
+        temperature = self.optimization_config.get('temperature', 0.5)
+
+        logger.info(f"开始优化失败的 Alpha (min_sharpe={min_sharpe}, top_n={top_n})")
+
+        try:
+            results = self.optimizer.optimize_top_failed(
+                top_n=top_n,
+                min_sharpe=min_sharpe,
+                temperature=temperature
+            )
+
+            # 将优化结果添加到队列
+            for result in results:
+                if result.get("success") and result.get("optimized"):
+                    self.alpha_queue.add_optimized(
+                        alpha=result["optimized"],
+                        original=result["original"],
+                        opt_type=result["failure_type"],
+                        metadata={
+                            "original_metrics": result.get("original_metrics", {}),
+                            "timestamp": result.get("timestamp")
+                        }
+                    )
+
+            logger.info(f"优化完成: 成功 {len(results)} 个")
+            return results
+
+        except Exception as e:
+            logger.error(f"优化失败: {e}")
+            return []
+
+    def get_user_alphas(self) -> List[Dict]:
+        """
+        获取用户未通过的 Alpha（用于优化器）
+
+        Returns:
+            Alpha 列表
+        """
+        try:
+            response = self.sess.get(
+                'https://api.worldquantbrain.com/users/self/alphas',
+                params={
+                    'limit': 100,
+                    'offset': 0,
+                    'order': '-is.sharpe',
+                    'hidden': 'false'
+                },
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                alphas = data.get('results', [])
+
+                # 转换为优化器需要的格式
+                result = []
+                for alpha in alphas:
+                    expression = alpha.get('regular', {}).get('code', '').strip()
+                    if expression:
+                        is_data = alpha.get('is', {})
+                        checks = is_data.get('checks', [])
+                        status = alpha.get('status', '')
+
+                        # 将 checks 数组转换为 check_status 字典
+                        check_status = {}
+                        # 同时保存完整的检查详情（包含 limit 和 value）
+                        check_details = []
+                        for check in checks:
+                            check_name = check.get('name', '')
+                            check_result = check.get('result', '')
+                            check_status[check_name] = check_result
+
+                            # 保存失败检查的详细信息
+                            if check_result == 'FAIL':
+                                check_details.append({
+                                    'name': check_name,
+                                    'result': check_result,
+                                    'limit': check.get('limit'),
+                                    'value': check.get('value')
+                                })
+
+                        # 判断是否可提交：status 不是 UNSUBMITTED 且所有检查通过
+                        is_submittable = status != 'UNSUBMITTED' and all(
+                            c.get('result') == 'PASS'
+                            for c in checks
+                        )
+
+                        result.append({
+                            'expression': expression,
+                            'sharpe': is_data.get('sharpe', 0),
+                            'fitness': is_data.get('fitness', 0),
+                            'turnover': is_data.get('turnover', 0),
+                            'is_submittable': is_submittable,
+                            'check_status': check_status,
+                            'check_details': check_details,  # 新增：详细失败信息
+                            'date_created': alpha.get('dateCreated'),
+                            'alpha_id': alpha.get('id')
+                        })
+
+                logger.info(f"获取用户 Alpha: {len(result)} 个")
+                return result
+
+            else:
+                logger.warning(f"获取用户 Alpha 失败: {response.status_code}")
+                return []
+
+        except Exception as e:
+            logger.error(f"获取用户 Alpha 异常: {e}")
+            return []
+
+    def test_alpha_with_source(self, alpha: str, source: str = "generated",
+                                original_alpha: str = None, opt_type: str = None) -> Dict:
+        """
+        测试 Alpha 并记录来源
+
+        Args:
+            alpha: Alpha 表达式
+            source: 来源（generated/optimized）
+            original_alpha: 原始表达式（优化时）
+            opt_type: 优化类型（优化时）
+
+        Returns:
+            测试结果
+        """
+        result = self.test_alpha(alpha)
+
+        # 添加来源信息
+        result["source"] = source
+        if source == "optimized":
+            result["original_alpha"] = original_alpha
+            result["optimization_type"] = opt_type
+
+        return result
+
+    def get_queue_stats(self) -> Dict:
+        """
+        获取队列统计
+
+        Returns:
+            统计数据
+        """
+        if self.alpha_queue:
+            return self.alpha_queue.get_stats()
+        return {"error": "队列未初始化"}
+
+    def report_optimization_stats(self):
+        """汇报优化统计"""
+        if not self.alpha_queue:
+            return
+
+        stats = self.alpha_queue.get_stats()
+
+        logger.info("=" * 60)
+        logger.info("Alpha 统计:")
+        logger.info(f"  队列大小: {stats.get('queue_size', 0)}")
+        logger.info(f"  已测试: {stats.get('tested_count', 0)}")
+
+        gen = stats.get('generated', {})
+        opt = stats.get('optimized', {})
+
+        logger.info(f"  生成: 总计 {gen.get('total', 0)}, 通过 {gen.get('passed', 0)}, "
+                   f"失败 {gen.get('failed', 0)}, 通过率 {gen.get('pass_rate', 0):.1f}%")
+
+        logger.info(f"  优化: 总计 {opt.get('total', 0)}, 通过 {opt.get('passed', 0)}, "
+                   f"失败 {opt.get('failed', 0)}, 通过率 {opt.get('pass_rate', 0):.1f}%")
+
+        if self.optimizer:
+            opt_stats = self.optimizer.get_stats()
+            logger.info(f"  优化器: 尝试 {opt_stats.get('total_attempts', 0)}, "
+                       f"成功 {opt_stats.get('successful', 0)}, "
+                       f"成功率 {opt_stats.get('success_rate', 0):.1f}%")
+
+        logger.info("=" * 60)
+
+
     def fetch_submitted_alphas(self):
         """Fetch submitted alphas from the WorldQuant API with retry logic"""
         url = "https://api.worldquantbrain.com/users/self/alphas"
@@ -1355,12 +1764,6 @@ def main():
 
     args = parser.parse_args()
 
-    # 更新日志级别（如果需要）
-    if args.log_level != 'INFO':
-        logger.setLevel(getattr(logging, args.log_level))
-        stream_handler.setLevel(getattr(logging, args.log_level))
-        file_handler.setLevel(getattr(logging, args.log_level))
-
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -1375,7 +1778,7 @@ def main():
             logger.warning(f"从配置文件加载模型失败: {e}")
     if model_name is None:
         model_name = 'llama3:8b'
-        logging.info(f"使用后备默认模型: {model_name}")
+        logger.info(f"使用后备默认模型: {model_name}")
 
     try:
         # Initialize alpha generator with Ollama
@@ -1393,57 +1796,88 @@ def main():
         
         batch_number = 1
         total_successful = 0
-        
+
         print(f"Starting continuous alpha mining with batch size {args.batch_size}")
         print(f"Results will be saved to {args.output_dir}")
         print(f"Using Ollama at {args.ollama_url}")
-        
+
+        # 显示优化状态
+        if generator.optimization_enabled:
+            print(f"优化功能已启用 - 每轮优化 {generator.optimization_config.get('optimize_per_cycle', 5)} 个 Alpha")
+        else:
+            print("优化功能未启用")
+
         while True:
             try:
-                logging.info(f"\nProcessing batch #{batch_number}")
-                logging.info("-" * 50)
-                
-                # Generate and submit batch using Ollama
+                logger.info(f"\nProcessing batch #{batch_number}")
+                logger.info("-" * 50)
+
+                # 1. 生成新 Alpha
+                logger.info("步骤 1: 生成新 Alpha...")
                 alpha_ideas = generator.generate_alpha_ideas_with_ollama(data_fields, operators)
-                batch_successful = generator.test_alpha_batch(alpha_ideas)
+
+                # 添加到队列（标记为生成）
+                if generator.alpha_queue:
+                    for alpha in alpha_ideas:
+                        generator.alpha_queue.add_generated(alpha)
+
+                # 2. 优化失败的 Alpha
+                if generator.optimization_enabled:
+                    logger.info("步骤 2: 优化失败的 Alpha...")
+                    try:
+                        optimized_results = generator.optimize_failed_alphas()
+                        if optimized_results:
+                            logger.info(f"优化完成: {len(optimized_results)} 个")
+                    except Exception as e:
+                        logger.error(f"优化过程出错: {e}")
+                else:
+                    logger.info("步骤 2: 跳过优化（未启用）")
+
+                # 3. 统一提交测试
+                logger.info("步骤 3: 提交测试...")
+                batch_successful = generator.test_alpha_batch()
                 total_successful += batch_successful
-                
+
+                # 4. 汇报统计
+                if generator.alpha_queue and batch_number % 5 == 0:
+                    generator.report_optimization_stats()
+
                 # Perform VRAM cleanup every few batches
                 generator.operation_count += 1
                 if generator.operation_count % generator.vram_cleanup_interval == 0:
                     generator.cleanup_vram()
-                
+
                 # Save batch results
                 results = generator.get_results()
                 timestamp = int(time.time())
                 output_file = os.path.join(args.output_dir, f'batch_{batch_number}_{timestamp}.json')
                 with open(output_file, 'w') as f:
                     json.dump(results, f, indent=2)
-                
-                logging.info(f"Batch {batch_number} results saved to {output_file}")
-                logging.info(f"Batch successful: {batch_successful}")
-                logging.info(f"Total successful alphas: {total_successful}")
-                
+
+                logger.info(f"Batch {batch_number} results saved to {output_file}")
+                logger.info(f"Batch successful: {batch_successful}")
+                logger.info(f"Total successful alphas: {total_successful}")
+
                 batch_number += 1
-                
+
                 # Sleep between batches
                 print(f"Sleeping for {args.sleep_time} seconds...")
                 sleep(args.sleep_time)
-                
+
             except Exception as e:
-                logging.error(f"Error in batch {batch_number}: {str(e)}")
-                logging.info("Sleeping for 5 minutes before retrying...")
+                logger.error(f"Error in batch {batch_number}: {str(e)}")
+                logger.info("Sleeping for 5 minutes before retrying...")
                 sleep(300)
                 continue
-        
+
     except KeyboardInterrupt:
-        logging.info("\nStopping alpha mining...")
-        logging.info(f"Total batches processed: {batch_number - 1}")
-        logging.info(f"Total successful alphas: {total_successful}")
+        logger.info("\nStopping alpha mining...")
+        logger.info(f"Total batches processed: {batch_number - 1}")
+        logger.info(f"Total successful alphas: {total_successful}")
         return 0
 
     except Exception as e:
-        logging.error(f"Fatal error: {str(e)}")
+        logger.error(f"Fatal error: {str(e)}")
         return 1
 
 
@@ -1458,11 +1892,11 @@ def setup_cleanup_handler(generator):
                 logger.info("线程池已关闭")
             except Exception as e:
                 logger.error(f"关闭线程池时出错: {e}")
-        # 停止 QueueListener
+        # 关闭日志系统
         try:
-            queue_listener.stop()
-            logger.info("QueueListener 已停止")
-        except Exception as e:
+            from logging_config import shutdown_logging
+            shutdown_logging()
+        except:
             pass
 
     def signal_handler(signum=None, frame=None):

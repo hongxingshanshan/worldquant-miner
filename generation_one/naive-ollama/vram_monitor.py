@@ -6,21 +6,17 @@ Monitors GPU memory usage and restarts services if VRAM usage is too high.
 
 import subprocess
 import time
-import logging
 import json
 import os
 from typing import Dict, List
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('vram_monitor.log')
-    ]
-)
-logger = logging.getLogger(__name__)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 class VRAMMonitor:
     def __init__(self, vram_threshold: float = 0.9, check_interval: int = 60):

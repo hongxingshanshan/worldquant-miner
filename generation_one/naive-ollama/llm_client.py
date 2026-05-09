@@ -3,12 +3,17 @@
 """
 import os
 import json
-import logging
 import requests
 from typing import List, Dict, Optional
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+# 使用统一日志配置
+try:
+    from logging_config import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
 
 # 加载 .env 文件的辅助函数
 def _load_env_file(config_path: str = None):
