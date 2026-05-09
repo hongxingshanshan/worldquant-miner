@@ -98,3 +98,6 @@ package.json
 # Mining results (runtime generated)
 **/mining_results_*.json
 **/submission_results.json
+**/performance.json
+**/test-gaps.json
+**/daemon-state.json
