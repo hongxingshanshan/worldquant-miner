@@ -49,7 +49,7 @@ ruflo agent_spawn --agentType security-auditor --task "扫描项目中的凭证�
 **使用 Ruflo 自动修复**:
 ```bash
 # 1. 启动 coder agent
-ruflo agent_spawn --agentType coder --task "为所有 requests.get/post 调用添加 timeout=30 参数"
+ruflo agent_spawn --agentType coder --task "为所有 requests.get/post 调用添加 timeout=300 参数"
 
 # 2. 或者使用 hooks_pre-edit
 ruflo hooks_pre-edit --filePath "alpha_orchestrator.py" --operation "update"
