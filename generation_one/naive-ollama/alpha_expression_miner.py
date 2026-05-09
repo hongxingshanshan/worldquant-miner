@@ -270,8 +270,23 @@ class AlphaExpressionMiner:
         limit_retry_count = 0
 
         while limit_retry_count < max_limit_retries:
-            sim_resp = self.sess.post('https://api.worldquantbrain.com/simulations', json=simulation_data)
-            logger.info(f"Simulation creation response: {sim_resp.status_code}")
+            try:
+                sim_resp = self.sess.post('https://api.worldquantbrain.com/simulations', json=simulation_data, timeout=30)
+                logger.info(f"Simulation creation response: {sim_resp.status_code}")
+            except requests.exceptions.RequestException as e:
+                limit_retry_count += 1
+                is_network_error = any(keyword in str(e).lower() for keyword in [
+                    'ssl', 'eof', 'protocol', 'proxy', 'connection', 'timeout', 'remote'
+                ])
+                if is_network_error and limit_retry_count < max_limit_retries:
+                    wait_time = 30 * limit_retry_count
+                    logger.warning(f"Network error during simulation creation (attempt {limit_retry_count}/{max_limit_retries}): {e}")
+                    logger.warning(f"Retrying in {wait_time}s...")
+                    sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Simulation creation failed after {limit_retry_count} retries: {e}")
+                    return {"status": "error", "message": str(e), "code": "network_error"}
 
             # 处理 429 并发限制
             if sim_resp.status_code == 429:
