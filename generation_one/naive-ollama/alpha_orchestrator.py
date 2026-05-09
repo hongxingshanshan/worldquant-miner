@@ -825,41 +825,41 @@ class AlphaOrchestrator:
     def restart_all_processes(self):
         """Restart all running processes to prevent stuck jobs."""
         logger.info("🔄 Restarting all processes to prevent stuck jobs...")
-        
-        # Stop current processes
-        self.stop_processes()
-        
+
+        # Stop current processes (不设置 running=False)
+        self._stop_subprocesses()
+
         # Wait a moment for processes to terminate
         time.sleep(5)
-        
+
+        # 确保运行状态为 True
+        self.running = True
+
         # Restart processes
         try:
             # Restart alpha generator
             logger.info("🔄 Restarting alpha generator...")
             self.start_alpha_generator_continuous(batch_size=3, sleep_time=30)
-            
+
             # Restart VRAM monitoring
             logger.info("🔄 Restarting VRAM monitoring...")
             self.start_vram_monitoring()
-            
+
             logger.info("✅ All processes restarted successfully")
             self.last_restart_time = time.time()
-            
+
         except Exception as e:
             logger.error(f"❌ Error during restart: {e}")
-    
-    def stop_processes(self):
-        """Stop all running processes."""
-        logger.info("Stopping all processes...")
-        self.running = False
-        
-        # Stop restart thread
-        if self.restart_thread and self.restart_thread.is_alive():
-            logger.info("Stopping restart monitoring thread...")
-        
+            import traceback
+            logger.error(traceback.format_exc())
+
+    def _stop_subprocesses(self):
+        """停止子进程，但不改变运行状态"""
+        logger.info("Stopping subprocesses...")
+
         # Stop VRAM monitoring
         self.stop_vram_monitoring()
-        
+
         if self.generator_process:
             logger.info("Terminating alpha generator process...")
             self.generator_process.terminate()
@@ -868,7 +868,7 @@ class AlphaOrchestrator:
             except subprocess.TimeoutExpired:
                 logger.warning("Force killing alpha generator process...")
                 self.generator_process.kill()
-        
+
         if self.miner_process:
             logger.info("Terminating alpha miner process...")
             self.miner_process.terminate()
@@ -877,6 +877,18 @@ class AlphaOrchestrator:
             except subprocess.TimeoutExpired:
                 logger.warning("Force killing alpha miner process...")
                 self.miner_process.kill()
+
+    def stop_processes(self):
+        """Stop all running processes."""
+        logger.info("Stopping all processes...")
+        self.running = False
+
+        # Stop restart thread
+        if self.restart_thread and self.restart_thread.is_alive():
+            logger.info("Stopping restart monitoring thread...")
+
+        # 停止子进程
+        self._stop_subprocesses()
 
     def daily_workflow(self):
         """Run the complete daily workflow."""

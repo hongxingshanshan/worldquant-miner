@@ -242,10 +242,10 @@ class AlphaExpressionMiner:
         logger.info(f"Generated {len(variations)} total variations")
         return variations
 
-    def test_alpha(self, alpha_expression: str) -> Dict:
+    def test_alpha(self, alpha_expression: str, retry_on_limit: bool = True) -> Dict:
         """Test an alpha expression using WorldQuant Brain simulation."""
         logger.info(f"Testing alpha: {alpha_expression}")
-        
+
         simulation_data = {
             'type': 'REGULAR',
             'settings': {
@@ -265,12 +265,31 @@ class AlphaExpressionMiner:
             'regular': alpha_expression
         }
 
-        sim_resp = self.sess.post('https://api.worldquantbrain.com/simulations', json=simulation_data)
-        logger.info(f"Simulation creation response: {sim_resp.status_code}")
-        
-        if sim_resp.status_code != 201:
-            logger.error(f"Simulation creation failed: {sim_resp.text}")
-            return {"status": "error", "message": sim_resp.text}
+        # 处理并发限制，最多重试 3 次
+        max_limit_retries = 3
+        limit_retry_count = 0
+
+        while limit_retry_count < max_limit_retries:
+            sim_resp = self.sess.post('https://api.worldquantbrain.com/simulations', json=simulation_data)
+            logger.info(f"Simulation creation response: {sim_resp.status_code}")
+
+            # 处理 429 并发限制
+            if sim_resp.status_code == 429:
+                limit_retry_count += 1
+                if retry_on_limit and limit_retry_count < max_limit_retries:
+                    wait_time = 30 * limit_retry_count  # 递增等待时间
+                    logger.warning(f"Concurrent simulation limit exceeded (attempt {limit_retry_count}/{max_limit_retries}), waiting {wait_time}s...")
+                    sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Simulation creation failed after {limit_retry_count} retries: {sim_resp.text}")
+                    return {"status": "error", "message": sim_resp.text, "code": 429}
+
+            if sim_resp.status_code != 201:
+                logger.error(f"Simulation creation failed: {sim_resp.text}")
+                return {"status": "error", "message": sim_resp.text}
+
+            break  # 成功创建，跳出重试循环
 
         sim_progress_url = sim_resp.headers.get('location')
         if not sim_progress_url:
@@ -381,6 +400,7 @@ def main():
     
     # Test variations
     results = []
+    failed_due_to_limit = False
     total = len(variations)
     for i, var in enumerate(variations, 1):
         logger.info(f"Testing variation {i}/{total}: {var}")
@@ -394,22 +414,31 @@ def main():
         else:
             logger.error(f"Failed to test variation: {var}")
             logger.error(f"Error: {result['message']}")
-    
+            # 检查是否因为并发限制失败
+            if result.get("code") == 429:
+                failed_due_to_limit = True
+                logger.warning("Stopping due to concurrent simulation limit")
+                break
+
     # Save results
     output_file = args.output_file if hasattr(args, 'output_file') else args.output
     logger.info(f"Saving {len(results)} results to {output_file}")
     with open(output_file, 'w') as f:
         json.dump(results, f, indent=2)
-    
-    # Always remove the mined alpha from hopeful_alphas.json after completion
-    # This prevents the same alpha from being processed again
-    logger.info("Mining completed, removing alpha from hopeful_alphas.json")
-    removed = miner.remove_alpha_from_hopeful(args.expression)
-    if removed:
-        logger.info(f"Successfully removed alpha '{args.expression}' from hopeful_alphas.json")
+
+    # 只有在没有因并发限制失败时才移除 alpha
+    if failed_due_to_limit:
+        logger.warning("Mining stopped due to concurrent limit, keeping alpha in hopeful_alphas.json for retry")
     else:
-        logger.warning(f"Could not remove alpha '{args.expression}' from hopeful_alphas.json (may not exist)")
-    
+        # Always remove the mined alpha from hopeful_alphas.json after completion
+        # This prevents the same alpha from being processed again
+        logger.info("Mining completed, removing alpha from hopeful_alphas.json")
+        removed = miner.remove_alpha_from_hopeful(args.expression)
+        if removed:
+            logger.info(f"Successfully removed alpha '{args.expression}' from hopeful_alphas.json")
+        else:
+            logger.warning(f"Could not remove alpha '{args.expression}' from hopeful_alphas.json (may not exist)")
+
     logger.info("Mining complete")
 
 if __name__ == "__main__":

@@ -1050,7 +1050,7 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
         return result
 
     def _test_alpha_impl(self, alpha_expression: str) -> Dict:
-        """Implementation of alpha testing with proper URL handling."""
+        """Implementation of alpha testing with proper URL handling and retry logic."""
         def submit_simulation():
             simulation_data = {
                 'type': 'REGULAR',
@@ -1072,40 +1072,60 @@ market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6
             }
             return self.sess.post('https://api.worldquantbrain.com/simulations', json=simulation_data, timeout=60)
 
-        try:
-            sim_resp = submit_simulation()
-            
-            # Handle authentication error
-            if sim_resp.status_code == 401 or (
-                sim_resp.status_code == 400 and 
-                "authentication credentials" in sim_resp.text.lower()
-            ):
-                logger.warning("Authentication expired, refreshing session...")
-                self.setup_auth(self.credentials_path)  # Refresh authentication
-                sim_resp = submit_simulation()  # Retry with new auth
-            
-            if sim_resp.status_code != 201:
-                return {"status": "error", "message": sim_resp.text}
+        max_retries = 3
+        retry_count = 0
 
-            sim_progress_url = sim_resp.headers.get('location')
-            if not sim_progress_url:
-                return {"status": "error", "message": "No progress URL received"}
+        while retry_count < max_retries:
+            try:
+                sim_resp = submit_simulation()
 
-            # 从 URL 中提取真实的模拟 ID
-            # URL 格式: https://api.worldquantbrain.com/simulations/{sim_id}
-            sim_id = sim_progress_url.rstrip('/').split('/')[-1]
+                # Handle authentication error
+                if sim_resp.status_code == 401 or (
+                    sim_resp.status_code == 400 and
+                    "authentication credentials" in sim_resp.text.lower()
+                ):
+                    logger.warning("Authentication expired, refreshing session...")
+                    self.setup_auth(self.credentials_path)  # Refresh authentication
+                    sim_resp = submit_simulation()  # Retry with new auth
 
-            return {
-                "status": "success",
-                "result": {
-                    "id": sim_id,
-                    "progress_url": sim_progress_url
+                if sim_resp.status_code != 201:
+                    return {"status": "error", "message": sim_resp.text}
+
+                sim_progress_url = sim_resp.headers.get('location')
+                if not sim_progress_url:
+                    return {"status": "error", "message": "No progress URL received"}
+
+                # 从 URL 中提取真实的模拟 ID
+                # URL 格式: https://api.worldquantbrain.com/simulations/{sim_id}
+                sim_id = sim_progress_url.rstrip('/').split('/')[-1]
+
+                return {
+                    "status": "success",
+                    "result": {
+                        "id": sim_id,
+                        "progress_url": sim_progress_url
+                    }
                 }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error testing alpha {alpha_expression}: {str(e)}")
-            return {"status": "error", "message": str(e)}
+
+            except Exception as e:
+                retry_count += 1
+                error_msg = str(e)
+
+                # 检查是否是 SSL 或代理错误
+                is_ssl_error = any(keyword in error_msg.lower() for keyword in [
+                    'ssl', 'eof', 'protocol', 'proxy', 'connection', 'timeout'
+                ])
+
+                if is_ssl_error and retry_count < max_retries:
+                    wait_time = 10 * retry_count
+                    logger.warning(f"Network error (attempt {retry_count}/{max_retries}), retrying in {wait_time}s: {error_msg}")
+                    sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"Error testing alpha {alpha_expression}: {error_msg}")
+                    return {"status": "error", "message": error_msg}
+
+        return {"status": "error", "message": "Max retries exceeded"}
 
     def log_hopeful_alpha(self, expression: str, alpha_data: Dict) -> None:
         """Log promising alphas to a JSON file."""
