@@ -100,5 +100,6 @@ package.json
 **/submission_results.json
 **/performance.json
 **/test-gaps.json
+**/codebase-map.json
 **/daemon-state.json
 **/security-audit.json
