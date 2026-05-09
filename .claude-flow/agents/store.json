@@ -1,0 +1,29 @@
+{
+  "agents": {
+    "agent-1778311499046-wfiaj1": {
+      "agentId": "agent-1778311499046-wfiaj1",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {},
+      "createdAt": "2026-05-09T07:24:59.096Z",
+      "domain": "code-review",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "agent-1778311771329-vxtaix": {
+      "agentId": "agent-1778311771329-vxtaix",
+      "agentType": "reviewer",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {},
+      "createdAt": "2026-05-09T07:29:31.332Z",
+      "domain": "code-review",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    }
+  },
+  "version": "3.0.0"
+}

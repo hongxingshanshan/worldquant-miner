@@ -88,16 +88,33 @@ simulation_errors.json
 **/fetch_community_*.py
 **/fetch_community_batch.py
 
-# Ruflo/Claude Flow runtime files
+# Ruflo/Claude Flow runtime files (exclude runtime, keep knowledge)
 .claude-flow/daemon.pid
 .claude-flow/daemon-state.json
 .claude-flow/metrics/
 .claude-flow/security/
 .claude-flow/swarm/
+.claude-flow/logs/
+.claude-flow/neural/
+.claude-flow/sessions/
+.claude-flow/workflows/
+.claude-flow/data/
+.claude-flow/graph/
+.claude-flow/hooks/
+.claude-flow/learning/
 .swarm/
 node_modules/
 package-lock.json
 package.json
 
+# Keep Ruflo knowledge base and agent data
+# !.claude-flow/agents/
+# !.claude-flow/github/
+# !agentdb.rvf
+
 # Submitted alphas cache
 **/submitted_alphas_cache.json
+
+# Mining results (runtime generated)
+**/mining_results_*.json
+**/submission_results.json
