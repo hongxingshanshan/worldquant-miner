@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-05-09T08:16:14.620Z",
+  "timestamp": "2026-05-09T08:31:14.639Z",
   "projectRoot": "C:\\WorkSpace\\worldquant-miner",
   "structure": {
     "hasPackageJson": true,
@@ -7,5 +7,5 @@
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1778314574621
+  "scannedAt": 1778315474640
 }
