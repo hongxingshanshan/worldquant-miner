@@ -1,7 +1,28 @@
 # RuFlo V3 Runtime Configuration
-# Generated: 2026-05-08T20:44:30.511Z
+# Updated: 2026-05-09
 
 version: "3.0.0"
+
+providers:
+  anthropic:
+    apiKey: "${ANTHROPIC_API_KEY}"
+    baseUrl: "${ANTHROPIC_BASE_URL}"
+    model: "glm-5.1"
+    models:
+      haiku: "glm-5.1"
+      sonnet: "glm-5.1"
+      opus: "glm-5.1"
+
+agents:
+  defaultModel: "glm-5.1"
+  modelMapping:
+    haiku: "glm-5.1"
+    sonnet: "glm-5.1"
+    opus: "glm-5.1"
+
+modelRouter:
+  defaultModel: "glm-5.1"
+  fallbackModel: "glm-5.1"
 
 swarm:
   topology: mesh
@@ -14,7 +35,6 @@ memory:
   enableHNSW: false
   persistPath: .claude-flow/data
   cacheSize: 100
-  # ADR-049: Self-Learning Memory
   learningBridge:
     enabled: false
     sonaMode: balanced

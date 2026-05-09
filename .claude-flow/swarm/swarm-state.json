@@ -98,6 +98,25 @@
       "createdAt": "2026-05-09T07:24:29.652Z",
       "updatedAt": "2026-05-09T07:41:53.554Z",
       "pid": 31108
+    },
+    "swarm-1778322108592-oi0r2k": {
+      "swarmId": "swarm-1778322108592-oi0r2k",
+      "topology": "hierarchical",
+      "maxAgents": 15,
+      "status": "running",
+      "agents": [],
+      "tasks": [],
+      "config": {
+        "topology": "hierarchical",
+        "maxAgents": 15,
+        "strategy": "specialized",
+        "communicationProtocol": "message-bus",
+        "autoScaling": true,
+        "consensusMechanism": "majority"
+      },
+      "createdAt": "2026-05-09T10:21:48.592Z",
+      "updatedAt": "2026-05-09T10:21:48.592Z",
+      "pid": 40260
     }
   },
   "version": "3.0.0"

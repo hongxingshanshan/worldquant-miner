@@ -1,15 +1,16 @@
 {
-  "totalDecisions": 2,
+  "totalDecisions": 0,
   "modelDistribution": {
     "haiku": 0,
     "sonnet": 0,
-    "opus": 2,
-    "inherit": 0
+    "opus": 0,
+    "inherit": 0,
+    "glm-5.1": 0
   },
-  "avgComplexity": 0.23525000000000001,
-  "avgConfidence": 0.5979251322770508,
+  "avgComplexity": 0,
+  "avgConfidence": 0,
   "circuitBreakerTrips": 0,
-  "lastUpdated": "2026-05-09T07:29:31.332Z",
+  "lastUpdated": "2026-05-09T10:55:00.000Z",
   "learningHistory": [],
   "priors": {
     "haiku": {
@@ -27,6 +28,16 @@
     "inherit": {
       "alpha": 1,
       "beta": 1
+    },
+    "glm-5.1": {
+      "alpha": 1,
+      "beta": 1
     }
-  }
+  },
+  "modelMapping": {
+    "haiku": "glm-5.1",
+    "sonnet": "glm-5.1",
+    "opus": "glm-5.1"
+  },
+  "defaultModel": "glm-5.1"
 }

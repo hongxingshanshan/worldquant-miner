@@ -23,6 +23,131 @@
       "domain": "code-review",
       "model": "haiku",
       "modelRoutedBy": "router"
+    },
+    "agent-1778322109943-anc0ka": {
+      "agentId": "agent-1778322109943-anc0ka",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic",
+        "task": "为 AlphaGenerator 添加结果清理机制，限制 max_results=1000"
+      },
+      "createdAt": "2026-05-09T10:21:49.971Z",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "agent-1778322111257-70gfws": {
+      "agentId": "agent-1778322111257-70gfws",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic",
+        "task": "为 load_knowledge_base 添加 lru_cache 装饰器"
+      },
+      "createdAt": "2026-05-09T10:21:51.266Z",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "agent-1778322112469-pnuos0": {
+      "agentId": "agent-1778322112469-pnuos0",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic",
+        "task": "实现令牌桶算法 RateLimiter 类"
+      },
+      "createdAt": "2026-05-09T10:21:52.477Z",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "agent-1778322113617-2ns05z": {
+      "agentId": "agent-1778322113617-2ns05z",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic",
+        "task": "使用哈希索引优化 is_similar_to_existing 方法"
+      },
+      "createdAt": "2026-05-09T10:21:53.625Z",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "agent-1778322140906-ptqeck": {
+      "agentId": "agent-1778322140906-ptqeck",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic",
+        "task": "验证修复后的代码质量"
+      },
+      "createdAt": "2026-05-09T10:22:20.914Z",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "agent-1778323127786-js0spu": {
+      "agentId": "agent-1778323127786-js0spu",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic",
+        "task": "测试连接"
+      },
+      "createdAt": "2026-05-09T10:38:47.794Z",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "agent-1778324098514-04zag6": {
+      "agentId": "agent-1778324098514-04zag6",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "provider": "anthropic",
+        "model": "glm-5.1",
+        "task": "测试 glm-5.1 模型"
+      },
+      "createdAt": "2026-05-09T10:54:58.523Z",
+      "model": "haiku",
+      "modelRoutedBy": "router"
+    },
+    "agent-1778324605421-qlgr8y": {
+      "agentId": "agent-1778324605421-qlgr8y",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "inherit"
+      },
+      "createdAt": "2026-05-09T11:03:25.422Z",
+      "model": "inherit",
+      "modelRoutedBy": "explicit"
+    },
+    "agent-1778325017142-eeyrun": {
+      "agentId": "agent-1778325017142-eeyrun",
+      "agentType": "coder",
+      "status": "idle",
+      "health": 1,
+      "taskCount": 0,
+      "config": {
+        "model": "inherit"
+      },
+      "createdAt": "2026-05-09T11:10:17.142Z",
+      "model": "inherit",
+      "modelRoutedBy": "explicit"
     }
   },
   "version": "3.0.0"

@@ -103,3 +103,6 @@ package.json
 **/codebase-map.json
 **/daemon-state.json
 **/security-audit.json
+**/consolidation.json
+claude-flow.config.json
+claude-flow.config.export.json
