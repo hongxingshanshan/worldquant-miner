@@ -58,8 +58,13 @@ SUCCESSFUL_PATTERNS_FILE = "successful_patterns.json"
 SUBMITTED_ALPHAS_CACHE = "submitted_alphas_cache.json"
 
 
-def load_successful_patterns(max_patterns: int = 20) -> List[Dict]:
-    """加载成功的 alpha 模式（fitness > 0.5）"""
+def load_successful_patterns(max_patterns: int = 20, randomize: bool = True) -> List[Dict]:
+    """加载成功的 alpha 模式（fitness > 0.5）
+
+    Args:
+        max_patterns: 最大加载数量
+        randomize: 是否随机选择（而非按 fitness 排序）
+    """
     patterns = []
     results_dir = "results"
 
@@ -74,7 +79,7 @@ def load_successful_patterns(max_patterns: int = 20) -> List[Dict]:
         result_files.sort(key=lambda x: os.path.getmtime(os.path.join(results_dir, x)), reverse=True)
 
         for filename in result_files[:100]:  # 只检查最近 100 个文件
-            if len(patterns) >= max_patterns:
+            if len(patterns) >= max_patterns * 2:  # 收集更多用于随机选择
                 break
             filepath = os.path.join(results_dir, filename)
             try:
@@ -107,9 +112,13 @@ def load_successful_patterns(max_patterns: int = 20) -> List[Dict]:
             except Exception as e:
                 continue
 
-        # 按 fitness 排序，取前 N 个
-        patterns.sort(key=lambda x: x.get("fitness", 0), reverse=True)
-        return patterns[:max_patterns]
+        if randomize and len(patterns) > max_patterns:
+            # 随机选择，而非按 fitness 排序
+            return random.sample(patterns, max_patterns)
+        else:
+            # 原有逻辑：按 fitness 排序
+            patterns.sort(key=lambda x: x.get("fitness", 0), reverse=True)
+            return patterns[:max_patterns]
 
     except Exception as e:
         logger.warning(f"Failed to load successful patterns: {e}")
@@ -174,8 +183,12 @@ def load_submitted_alphas(sess, max_alphas: int = 20) -> List[Dict]:
     return alphas[:max_alphas]
 
 
-def load_knowledge_base() -> str:
-    """加载 WorldQuant Brain 知识库，智能分段加载"""
+def load_knowledge_base(randomize: bool = True) -> str:
+    """加载 WorldQuant Brain 知识库，智能分段加载，支持随机章节选择
+
+    Args:
+        randomize: 是否随机选择章节（而非按优先级顺序）
+    """
     knowledge_parts = []
 
     # 知识库文件及其关键章节（按优先级）
@@ -219,7 +232,7 @@ def load_knowledge_base() -> str:
                         content = parts[2].strip()
 
                 # 智能提取关键章节
-                extracted = extract_key_sections(content, config['key_sections'])
+                extracted = extract_key_sections(content, config['key_sections'], randomize=randomize)
 
                 # 如果没有找到关键章节，使用前 N 字符
                 if not extracted:
@@ -236,8 +249,14 @@ def load_knowledge_base() -> str:
     return "\n\n".join(knowledge_parts)
 
 
-def extract_key_sections(content: str, key_sections: List[str]) -> str:
-    """从内容中提取关键章节"""
+def extract_key_sections(content: str, key_sections: List[str], randomize: bool = False) -> str:
+    """从内容中提取关键章节，支持随机选择
+
+    Args:
+        content: 文档内容
+        key_sections: 关键章节关键词列表
+        randomize: 是否随机选择章节（而非按顺序）
+    """
     extracted = []
     lines = content.split('\n')
     current_section = None
@@ -267,11 +286,20 @@ def extract_key_sections(content: str, key_sections: List[str]) -> str:
                 result.append(section)
                 break
 
+    # 随机化：打乱章节顺序
+    if randomize and len(result) > 1:
+        random.shuffle(result)
+
     return '\n\n'.join(result)
 
 
-def load_data_fields_reference(max_fields: int = 80) -> str:
-    """加载数据字段参考，用于 prompt 增强"""
+def load_data_fields_reference(max_fields: int = 80, randomize: bool = True) -> str:
+    """加载数据字段参考，用于 prompt 增强，支持随机化字段顺序
+
+    Args:
+        max_fields: 最大加载数量
+        randomize: 是否随机选择字段（而非按覆盖率排序）
+    """
     fields_file = os.path.join(KNOWLEDGE_BASE_PATH, "worldquant_data_fields.json")
 
     if not os.path.exists(fields_file):
@@ -297,23 +325,41 @@ def load_data_fields_reference(max_fields: int = 80) -> str:
         # 选择高覆盖率字段
         selected_fields = []
         for dataset_name, fields in datasets.items():
-            # 按覆盖率排序
-            sorted_fields = sorted(fields, key=lambda x: x['coverage'], reverse=True)
-            # 每个数据集取前几个
-            for field in sorted_fields[:8]:
-                selected_fields.append({
-                    'dataset': dataset_name,
-                    **field
-                })
-                if len(selected_fields) >= max_fields:
-                    break
+            if randomize:
+                # 随机打乱后选择
+                shuffled = fields.copy()
+                random.shuffle(shuffled)
+                for field in shuffled[:8]:
+                    selected_fields.append({
+                        'dataset': dataset_name,
+                        **field
+                    })
+                    if len(selected_fields) >= max_fields:
+                        break
+            else:
+                # 按覆盖率排序
+                sorted_fields = sorted(fields, key=lambda x: x['coverage'], reverse=True)
+                for field in sorted_fields[:8]:
+                    selected_fields.append({
+                        'dataset': dataset_name,
+                        **field
+                    })
+                    if len(selected_fields) >= max_fields:
+                        break
             if len(selected_fields) >= max_fields:
                 break
 
         # 格式化输出
         lines = ["## 高覆盖率数据字段\n"]
         current_dataset = None
-        for field in sorted(selected_fields, key=lambda x: (x['dataset'], -x['coverage'])):
+
+        # 随机化时打乱整体顺序
+        if randomize:
+            random.shuffle(selected_fields)
+        else:
+            selected_fields = sorted(selected_fields, key=lambda x: (x['dataset'], -x['coverage']))
+
+        for field in selected_fields:
             if field['dataset'] != current_dataset:
                 current_dataset = field['dataset']
                 lines.append(f"\n### {current_dataset}\n")
@@ -324,6 +370,45 @@ def load_data_fields_reference(max_fields: int = 80) -> str:
     except Exception as e:
         logger.warning(f"Failed to load data fields: {e}")
         return ""
+
+
+def _get_random_strategy_hints() -> str:
+    """获取随机策略提示，增加生成多样性"""
+    strategies = [
+        "考虑使用时间序列操作符（ts_mean, ts_std_dev, ts_rank）捕捉动量或反转信号",
+        "尝试组合多个数据字段，使用算术操作符（add, subtract, multiply, divide）",
+        "使用 rank 或 zscore 进行横截面标准化，减少行业偏差",
+        "关注财务数据（fundamental）与市场数据（model）的交互",
+        "考虑使用 group 操作符进行行业中性化",
+        "尝试使用逻辑操作符（greater, less, if_else）构建条件表达式",
+        "关注新闻和分析师数据（news, analyst）的情绪信号",
+        "使用 ts_decay 或 ts_product 捕捉趋势衰减",
+        "考虑使用 ts_corr 计算相关性因子",
+        "尝试使用 ts_delta 或 ts_pct_change 捕捉变化率",
+    ]
+    # 随机选择 3-5 条策略
+    num_hints = random.randint(3, 5)
+    selected = random.sample(strategies, num_hints)
+    return "\n".join([f"- {hint}" for hint in selected])
+
+
+def _get_random_example_format() -> str:
+    """获取随机示例格式，增加 prompt 多样性"""
+    examples = [
+        """Example format:
+ts_std_dev(cashflow_op, 180)
+rank(divide(revenue, assets))
+market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6_newqeventv110_optrfrq);expected_return = rfr+beta_last_360_days_spy*(market_ret-rfr);actual_return = ts_product(returns+1,250)-1;actual_return-expected_return""",
+        """Example format:
+ts_rank(volume, 20)
+zscore(eps_estimate, industry)
+group_neutralize(ts_mean(returns, 10), sector)""",
+        """Example format:
+rank(ts_delta(close, 5))
+divide(ts_sum(earnings, 60), ts_sum(revenue, 60))
+if_else(greater(sharpe, 1), rank(returns), rank(-returns))""",
+    ]
+    return random.choice(examples)
 
 
 class RetryQueue:
@@ -644,20 +729,20 @@ class AlphaGenerator:
                     error_context += f"- {err.get('expression', '')[:60]}...\n"
                     error_context += f"  Error: {err.get('error_message', 'Unknown')}\n"
 
-            # 加载知识库
-            knowledge_base = load_knowledge_base()
+            # 加载知识库（随机选择章节）
+            knowledge_base = load_knowledge_base(randomize=True)
             knowledge_context = ""
             if knowledge_base:
                 knowledge_context = f"\n\n### WorldQuant Brain Knowledge Base:\n{knowledge_base}\n"
 
-            # 加载数据字段参考（高覆盖率字段）
-            data_fields_ref = load_data_fields_reference(max_fields=80)
+            # 加载数据字段参考（随机选择字段）
+            data_fields_ref = load_data_fields_reference(max_fields=80, randomize=True)
             fields_ref_context = ""
             if data_fields_ref:
-                fields_ref_context = f"\n\n### High-Coverage Data Fields (Recommended):\n{data_fields_ref}\n"
+                fields_ref_context = f"\n\n### High-COverage Data Fields (Recommended):\n{data_fields_ref}\n"
 
-            # 加载成功的 alpha 模式（fitness 反馈）
-            successful_patterns = load_successful_patterns(max_patterns=10)
+            # 加载成功的 alpha 模式（随机选择）
+            successful_patterns = load_successful_patterns(max_patterns=10, randomize=True)
             success_context = ""
             if successful_patterns:
                 success_context = "\n\n### Successful Alpha Patterns (High Fitness, Learn from These):\n"
@@ -679,6 +764,12 @@ class AlphaGenerator:
                     if alpha.get('dateSubmitted'):
                         submitted_context += f", Submitted: {alpha['dateSubmitted'][:10]}"
                     submitted_context += "\n"
+
+            # 获取随机策略提示
+            strategy_hints = _get_random_strategy_hints()
+
+            # 获取随机示例格式
+            example_format = _get_random_example_format()
 
             prompt = f"""Generate 5 unique alpha factor expressions using the available operators and data fields. Return ONLY the expressions, one per line, with no comments or explanations.
 
@@ -722,10 +813,10 @@ Tips:
 - Learn from the successful patterns - they have high fitness scores.
 - Reference submitted alphas for style and complexity guidance.
 
-Example format:
-ts_std_dev(cashflow_op, 180)
-rank(divide(revenue, assets))
-market_ret = ts_product(1+group_mean(returns,1,market),250)-1;rfr = vec_avg(fnd6_newqeventv110_optrfrq);expected_return = rfr+beta_last_360_days_spy*(market_ret-rfr);actual_return = ts_product(returns+1,250)-1;actual_return-expected_return
+Strategy Suggestions (pick one or combine):
+{strategy_hints}
+
+{example_format}
 """
 
             # 系统提示词（用于线上模型）

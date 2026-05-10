@@ -7,13 +7,13 @@ from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import argparse
 from datetime import datetime, timedelta
+import logging
 
 # 使用统一日志配置
 try:
     from logging_config import get_logger
     logger = get_logger(__name__)
 except ImportError:
-    import logging
     logger = logging.getLogger(__name__)
 
 class ImprovedAlphaSubmitter:
