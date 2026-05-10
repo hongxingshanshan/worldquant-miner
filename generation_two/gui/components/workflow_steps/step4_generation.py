@@ -460,8 +460,10 @@ Generate a valid FASTEXPR expression that uses operator(data_field, parameters) 
                     
                     from generation_two.core.algorithmic_template_generator import AlgorithmicTemplateGenerator
                     import random
-                    
-                    generator = AlgorithmicTemplateGenerator(selected_operators_list, selected_fields)
+
+                    # Get config_manager from workflow
+                    config_manager = getattr(self.workflow, 'config_manager', None)
+                    generator = AlgorithmicTemplateGenerator(selected_operators_list, selected_fields, config_manager=config_manager)
                     
                     # Try to generate unique template (check duplicates)
                     max_duplicate_retries = 10

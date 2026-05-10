@@ -148,16 +148,21 @@ class MiningEngine:
             
             # Use algorithmic generation (like Step 4) - generates placeholders
             from generation_two.core.algorithmic_template_generator import AlgorithmicTemplateGenerator
-            
+
             available_operators = self.generator.template_generator.operator_fetcher.operators if self.generator.template_generator.operator_fetcher else None
             available_fields = self.generator.template_generator.get_data_fields_for_region(region)
-            
+
             if not available_operators or not available_fields:
                 logger.warning(f"No operators or fields available for {region}")
                 return (None, None)
-            
+
+            # Get config_manager from generator if available
+            config_manager = getattr(self.generator, 'config_manager', None)
+            if config_manager is None:
+                config_manager = getattr(self.generator.template_generator, 'config_manager', None)
+
             # Generate placeholder template algorithmically
-            generator = AlgorithmicTemplateGenerator(available_operators, available_fields)
+            generator = AlgorithmicTemplateGenerator(available_operators, available_fields, config_manager=config_manager)
             
             # Try up to 10 times to generate a template different from database
             max_retries = 10

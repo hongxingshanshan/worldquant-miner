@@ -33,17 +33,32 @@ class AlgorithmicTemplateGenerator:
     """
     Generates placeholder expressions algorithmically, then uses Ollama to select indices
     """
-    
-    def __init__(self, operators: List[Dict], data_fields: List[Dict]):
+
+    # Default operator scope filter settings
+    DEFAULT_ALLOWED_OPERATOR_SCOPES = ['REGULAR']
+    DEFAULT_OPERATOR_SCOPE_FILTER_ENABLED = True
+    DEFAULT_OPERATOR_BLACKLIST = [
+        # Operators that are marked as REGULAR in operatorRAW.json but actually not available
+        'ts_min', 'ts_max', 'ts_target_tvr_delta_limit', 'group_cartesian_product',
+        'to_nan', 'vector_neut', 'vec_min', 'vec_max', 'vec_sum', 'vec_avg',
+        'generate_stats', 'self_corr', 'reduce_stddev', 'reduce_skewness',
+        'reduce_range', 'reduce_powersum', 'reduce_percentage', 'reduce_norm',
+        'reduce_min', 'reduce_max', 'reduce_kurtosis', 'reduce_ir', 'reduce_count',
+        'reduce_choose', 'reduce_avg', 'reduce_sum', 'combo_a', 'universe_size', 'in'
+    ]
+
+    def __init__(self, operators: List[Dict], data_fields: List[Dict], config_manager=None):
         """
         Initialize algorithmic template generator
-        
+
         Args:
             operators: List of operator dicts from operatorRAW.json
             data_fields: List of data field dicts
+            config_manager: Optional ConfigManager instance for dynamic configuration
         """
         self.operators = operators
         self.data_fields = data_fields
+        self.config_manager = config_manager
         self.operator_metadata = self._extract_operator_metadata(operators)
         
     def _extract_operator_metadata(self, operators: List[Dict]) -> Dict[str, OperatorMetadata]:
@@ -86,6 +101,80 @@ class AlgorithmicTemplateGenerator:
             )
         
         return metadata
+
+    def _get_operator_scope_filter_config(self) -> Tuple[bool, List[str]]:
+        """
+        Get operator scope filter configuration from config manager
+
+        Returns:
+            Tuple of (filter_enabled, allowed_scopes)
+        """
+        if self.config_manager:
+            filter_enabled = self.config_manager.get(
+                'template_generation',
+                'operator_scope_filter_enabled',
+                self.DEFAULT_OPERATOR_SCOPE_FILTER_ENABLED
+            )
+            allowed_scopes = self.config_manager.get(
+                'template_generation',
+                'allowed_operator_scopes',
+                self.DEFAULT_ALLOWED_OPERATOR_SCOPES
+            )
+        else:
+            filter_enabled = self.DEFAULT_OPERATOR_SCOPE_FILTER_ENABLED
+            allowed_scopes = self.DEFAULT_ALLOWED_OPERATOR_SCOPES
+
+        return filter_enabled, allowed_scopes
+
+    def _filter_operators_by_scope(self, operators: List[Dict]) -> List[Dict]:
+        """
+        Filter operators by allowed scopes and blacklist
+
+        Args:
+            operators: List of operator dicts
+
+        Returns:
+            Filtered list of operators
+        """
+        filter_enabled, allowed_scopes = self._get_operator_scope_filter_config()
+
+        # Get blacklist from config
+        operator_blacklist = self.DEFAULT_OPERATOR_BLACKLIST
+        if self.config_manager:
+            operator_blacklist = self.config_manager.get(
+                'template_generation',
+                'operator_blacklist',
+                self.DEFAULT_OPERATOR_BLACKLIST
+            )
+
+        filtered = []
+        for op in operators:
+            name = op.get('name', '')
+
+            # Check blacklist first
+            if name in operator_blacklist:
+                logger.debug(f"Operator '{name}' is in blacklist, skipping")
+                continue
+
+            if not filter_enabled:
+                filtered.append(op)
+                continue
+
+            # Check scope
+            op_scope = op.get('scope', [])
+            # Check if operator's scope intersects with allowed scopes
+            if isinstance(op_scope, list):
+                if any(s in allowed_scopes for s in op_scope):
+                    filtered.append(op)
+            elif op_scope in allowed_scopes:
+                filtered.append(op)
+
+        logger.info(
+            f"Operator filter: {len(filtered)}/{len(operators)} operators available "
+            f"(blacklist: {len(operator_blacklist)}, allowed scopes: {allowed_scopes})"
+        )
+
+        return filtered
     
     def _parse_num_inputs(self, definition: str) -> Tuple[int, int]:
         """
@@ -328,16 +417,19 @@ class AlgorithmicTemplateGenerator:
     ) -> str:
         """
         Generate prompt for Ollama to select operators/fields by index
-        
+
         Args:
             placeholder_expression: Expression with placeholders like "OPERATOR1(OPERATOR2(DATA_FIELD1), 5)"
             available_operators: List of available operators
             available_fields: List of available data fields
-        
+
         Returns:
             Prompt string for Ollama
         """
         import random
+
+        # Apply operator scope filter
+        available_operators = self._filter_operators_by_scope(available_operators)
         
         # Count placeholders (case-insensitive matching)
         operator_placeholders = re.findall(r'OPERATOR(\d+)', placeholder_expression, re.IGNORECASE)

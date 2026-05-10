@@ -112,7 +112,18 @@ class ConfigManager:
             'ollama_priority': True,
             'temperature': 0.7,
             'max_tokens': 500,
-            'fallback_enabled': True
+            'fallback_enabled': True,
+            'allowed_operator_scopes': ['REGULAR'],
+            'operator_scope_filter_enabled': True,
+            'operator_blacklist': [
+                # Operators that are marked as REGULAR in operatorRAW.json but actually not available
+                'ts_min', 'ts_max', 'ts_target_tvr_delta_limit', 'group_cartesian_product',
+                'to_nan', 'vector_neut', 'vec_min', 'vec_max', 'vec_sum', 'vec_avg',
+                'generate_stats', 'self_corr', 'reduce_stddev', 'reduce_skewness',
+                'reduce_range', 'reduce_powersum', 'reduce_percentage', 'reduce_norm',
+                'reduce_min', 'reduce_max', 'reduce_kurtosis', 'reduce_ir', 'reduce_count',
+                'reduce_choose', 'reduce_avg', 'reduce_sum', 'combo_a', 'universe_size', 'in'
+            ]
         }, "Template generation configuration")
         
         # Advanced Bandit System configuration

@@ -65,28 +65,31 @@ class OllamaManager:
     """
     
     def __init__(
-        self, 
+        self,
         base_url: str = "http://localhost:11434",
         model: str = "qwen2.5-coder:32b",
         timeout: int = 120,
         max_retries: int = 3,
-        rate_limit: float = 2.0  # seconds between requests
+        rate_limit: float = 2.0,  # seconds between requests
+        config_manager = None  # Optional config manager for dynamic settings
     ):
         """
         Initialize Ollama manager
-        
+
         Args:
             base_url: Ollama server URL
             model: Model name to use
             timeout: Request timeout in seconds
             max_retries: Maximum retry attempts
             rate_limit: Minimum seconds between requests
+            config_manager: Optional ConfigManager for dynamic configuration
         """
         self.base_url = base_url.rstrip('/')
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
         self.rate_limit = rate_limit
+        self.config_manager = config_manager  # Store config manager reference
         
         # Connection state
         self.is_available = False
@@ -655,9 +658,9 @@ class OllamaManager:
             Dict with "operators" and "fields" mappings, or None if failed
         """
         from generation_two.core.algorithmic_template_generator import AlgorithmicTemplateGenerator
-        
+
         if generator is None:
-            generator = AlgorithmicTemplateGenerator(available_operators, available_fields)
+            generator = AlgorithmicTemplateGenerator(available_operators, available_fields, config_manager=self.config_manager)
 
         # Get recently used fields to avoid repetition
         recently_used_fields = []
@@ -766,7 +769,7 @@ Example: If the prompt lists OPERATOR1, OPERATOR2, OPERATOR3, your JSON must inc
             
             missing_operators = [op for op in required_ops if op not in selection.get('operators', {})]
             missing_fields = [field for field in required_fields if field not in selection.get('fields', {})]
-            
+
             if missing_operators or missing_fields:
                 logger.warning(f"⚠️ Ollama did not select all required placeholders!")
                 if missing_operators:
@@ -776,7 +779,8 @@ Example: If the prompt lists OPERATOR1, OPERATOR2, OPERATOR3, your JSON must inc
                 logger.warning(f"   Required operators: {required_ops}")
                 logger.warning(f"   Required fields: {required_fields}")
                 logger.warning(f"   Received (after filtering): {selection}")
-                # Don't return None - we'll try to work with what we have, but log the issue
+                # Return None to trigger retry - incomplete selection will cause errors
+                return None
             
             # Validate structure
             if 'operators' in selection and 'fields' in selection:
@@ -811,9 +815,12 @@ Example: If the prompt lists OPERATOR1, OPERATOR2, OPERATOR3, your JSON must inc
             Expression with placeholders replaced, or None if failed
         """
         from generation_two.core.algorithmic_template_generator import AlgorithmicTemplateGenerator
-        
+
         # Create generator to get prompt and mappings
-        generator = AlgorithmicTemplateGenerator(available_operators, available_fields)
+        generator = AlgorithmicTemplateGenerator(available_operators, available_fields, config_manager=self.config_manager)
+
+        # Filter operators (same as in get_operator_selection_prompt)
+        filtered_operators = generator._filter_operators_by_scope(available_operators)
         
         # Ask Ollama to select (this will set _last_operator_mapping and _last_field_mapping)
         selection = self.select_operators_and_fields_by_index(
@@ -859,18 +866,19 @@ Example: If the prompt lists OPERATOR1, OPERATOR2, OPERATOR3, your JSON must inc
         
         # Replace operators (use display index -> actual index mapping)
         # Handle both uppercase OPERATOR1 and lowercase operator1
+        # NOTE: Use filtered_operators instead of original available_operators
         if 'operators' in selection:
             for placeholder_key, display_index in selection['operators'].items():
                 # Normalize the key from selection to uppercase
                 normalized_key = placeholder_key.upper()
-                
+
                 # Find the actual placeholder in the template (might be lowercase)
                 actual_placeholder_in_template = operator_placeholder_map.get(normalized_key, normalized_key)
-                
+
                 # Convert display index to actual index
                 actual_index = operator_mapping.get(display_index, display_index)
-                if 0 <= actual_index < len(available_operators):
-                    operator_name = available_operators[actual_index].get('name', '')
+                if 0 <= actual_index < len(filtered_operators):
+                    operator_name = filtered_operators[actual_index].get('name', '')
                     if operator_name:
                         # Check if operator has minimum input requirements
                         metadata = generator.operator_metadata.get(operator_name)
@@ -979,12 +987,12 @@ Example: If the prompt lists OPERATOR1, OPERATOR2, OPERATOR3, your JSON must inc
         if use_algorithmic_generation and available_operators and available_fields:
             try:
                 from generation_two.core.algorithmic_template_generator import AlgorithmicTemplateGenerator
-                
+
                 if progress_callback:
                     progress_callback("Generating placeholder expression algorithmically...")
-                
+
                 # Step 1: Generate placeholder expression algorithmically
-                generator = AlgorithmicTemplateGenerator(available_operators, available_fields)
+                generator = AlgorithmicTemplateGenerator(available_operators, available_fields, config_manager=self.config_manager)
                 
                 # Choose generation method randomly
                 methods = ["random_walk", "brownian", "tree", "linear"]
