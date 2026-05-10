@@ -804,6 +804,41 @@ Requirements:
 3. Anything is possible 42.
 4. Avoid using event-type data fields (like nws12_*, fnd6_newqeventv*) with time series operators (ts_rank, ts_sum, etc.) as they don't support event inputs.
 
+Critical Success Patterns (MUST FOLLOW):
+1. ALWAYS wrap expression with rank() / ts_rank() / group_rank() as the outermost operator - this ensures weight distribution and passes CONCENTRATED_WEIGHT check.
+2. For fundamental data, use divide(field, cap) for market cap normalization - makes factor size-neutral.
+3. Use group_neutralize(expr, industry) for industry neutralization - improves SUB_UNIVERSE_SHARPE.
+4. Time window parameters: use 20-120 days (common: 20, 60, 120).
+5. Target Turnover range: 0.15-0.45 (avoid too low or too high).
+
+Advanced Techniques (from WorldQuant Brain Guide):
+1. Neutralization Options:
+   - group_neutralize(expr, industry) - industry neutralization
+   - group_neutralize(expr, sector) - sector neutralization
+   - group_neutralize(expr, subindustry) - subindustry neutralization
+   - regression_neut(expr, factor) - regression neutralization for Size, Beta, Momentum
+
+2. Position Distribution Operators:
+   - rank(expr) - uniform distribution (recommended)
+   - signed_power(expr, 0.5-0.8) - more extreme distribution, higher volatility
+   - log(1 + abs(expr)) * sign(expr) - log distribution
+
+3. Alpha Synergy (combine multiple signals):
+   - Trade_when(A1 > x, A2, A1 <= x) - conditional combination
+   - Avoid simple linear combinations like 3*A1 + 4*A2 (bad for diversification)
+
+Proven Templates:
+- rank(ts_zscore(divide(fundamental_field, cap), 40-80))
+- ts_rank(divide(market_field, cap), 60)
+- group_neutralize(ts_decay_linear(ts_rank(signal_field, 20-60), 5-10), industry)
+- group_rank(ts_rank(ratio_field, 60), industry)
+- signed_power(group_neutralize(expr, industry), 0.6)
+
+Overfitting Warnings:
+- Do NOT fine-tune too many details to increase In-Sample performance - leads to poor Out-Sample performance.
+- Do NOT concentrate positions in few instruments - use rank() to distribute weights.
+- Focus on economic significance and robustness, not just high fitness scores.
+
 Tips:
 - You can use semi-colons to separate expressions.
 - Pay attention to operator types (SCALAR, VECTOR, MATRIX) for compatibility.

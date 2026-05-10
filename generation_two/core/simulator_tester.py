@@ -112,12 +112,12 @@ class SimulatorTester:
         """
         try:
             from dataclasses import asdict
-            
+
             region_config = self.region_configs.get(region)
             if not region_config:
-                logger.error(f"Unknown region: {region}")
+                logger.error(f"❌ Unknown region: {region}. Available regions: {list(self.region_configs.keys())}")
                 return None
-            
+
             # Verify session has cookies before making request (for debugging)
             if not self.sess.cookies:
                 logger.warning("⚠️ Session has no cookies - authentication may have expired")
@@ -125,6 +125,10 @@ class SimulatorTester:
                 if self.template_generator:
                     logger.info("Attempting to re-authenticate...")
                     self.template_generator.setup_auth()
+                    # Verify re-authentication worked
+                    if not self.sess.cookies:
+                        logger.error("❌ Re-authentication failed - still no cookies")
+                        return None
             
             # Prepare simulation data in the correct format
             # Update settings with region-specific values

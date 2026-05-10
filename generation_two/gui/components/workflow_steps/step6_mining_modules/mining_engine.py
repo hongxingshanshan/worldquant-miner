@@ -545,9 +545,13 @@ class MiningEngine:
             
             # Handle refeed if failed
             if result and not result.success:
-                result = self._handle_refeed(slot_id, template, region, result.error_message, settings)
-            
-            # Check if result is None (simulation failed completely)
+                refeed_result = self._handle_refeed(slot_id, template, region, result.error_message, settings)
+                # Only use refeed result if it's not None
+                if refeed_result is not None:
+                    result = refeed_result
+                # If refeed returned None, keep the original result (failed simulation)
+
+            # Check if result is None (should never happen as monitor_simulation always returns SimulationResult)
             if result is None:
                 self.slot_manager.release_slot(slot_id, success=False, error="Simulation failed")
                 self._update_slot(slot_id, template, region, 0, "Simulation failed", "FAILED")
@@ -593,11 +597,20 @@ class MiningEngine:
             self._update_slot(slot_id, template, region, 0, str(e)[:30], "FAILED")
     
     def _handle_refeed(self, slot_id: int, template: str, region: str, error_message: str, settings: SimulationSettings):
-        """Handle refeed correction"""
-        if not self.generator.template_generator.template_validator:
+        """Handle refeed correction - returns SimulationResult or None if no correction possible"""
+        # Log why refeed is being attempted
+        slot = self.slot_manager.get_slot_status(slot_id)
+
+        if not self.generator or not self.generator.template_generator:
+            if slot:
+                slot.add_log("⚠️ Cannot refeed: generator not available")
             return None
 
-        slot = self.slot_manager.get_slot_status(slot_id)
+        if not self.generator.template_generator.template_validator:
+            if slot:
+                slot.add_log("⚠️ Cannot refeed: template_validator not initialized")
+            return None
+
         if slot:
             slot.add_log("🔄 Attempting refeed correction...")
         self._update_slot(slot_id, template, region, 50, "Fixing template...")

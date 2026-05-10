@@ -30,7 +30,7 @@ class TemplateGenerator:
         credentials: List[str] = None,  # New: allow passing credentials directly
         deepseek_api_key: str = None,
         ollama_url: str = "http://localhost:11434",
-        ollama_model: str = "qwen2.5-coder:1.5b",
+        ollama_model: str = "llama3:8b",  # Use llama3:8b for better JSON generation
         db_path: str = "generation_two_backtests.db"
     ):
         """

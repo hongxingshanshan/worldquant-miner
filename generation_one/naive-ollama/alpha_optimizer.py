@@ -45,6 +45,8 @@ OPTIMIZATION_PROMPT = """
 - 增强信号强度：scale(expr), normalize(expr)
 - 添加动量：ts_delta(expr, 5), ts_momentum(expr, 5)
 - 使用排名：rank(expr), group_rank(expr, industry)
+- 行业中性化：group_neutralize(expr, industry)
+- 尝试 signed_power(expr, 0.6) 增加信号强度
 
 ### LOW_FITNESS (适应度低)
 问题：Sharpe 和 Turnover 不平衡
@@ -52,20 +54,27 @@ OPTIMIZATION_PROMPT = """
 - 优化信号质量：rank(ts_mean(expr, 5))
 - 平衡收益与成本：expr - 0.1 * abs(delta(expr, 1))
 - 添加时间平滑：ts_decay_linear(expr, 5)
+- 确保外层有 rank() 或 ts_rank()
 
 ### CONCENTRATED_WEIGHT (权重集中)
 问题：权重过于集中在少数股票
 解决：
-- 添加时间平滑：ts_mean(expr, 5), ts_decay_linear(expr, 5)
-- 使用分散函数：rank(expr), zscore(expr)
+- 添加外层排名：rank(expr), ts_rank(expr, 20) - 关键！
+- 行业中性化：group_neutralize(expr, industry) - 关键！
+- 板块中性化：group_neutralize(expr, sector)
+- 使用分散函数：zscore(expr)
 - 避免极端值：winsorize(expr, 0.01)
+- 时间平滑：ts_mean(expr, 5), ts_decay_linear(expr, 5)
 
 ### LOW_SUB_UNIVERSE_SHARPE (子宇宙夏普值低)
-问题：信号强度不足或噪音过大
+问题：在某些行业或市值范围内表现不佳
 解决：
+- 行业中性化：group_neutralize(expr, industry) - 最重要！
+- 板块中性化：group_neutralize(expr, sector)
+- 子行业中性化：group_neutralize(expr, subindustry)
+- 市值标准化：divide(expr, cap)
+- 回归中性化：regression_neut(expr, factor) - 中性化 Size, Beta, Momentum
 - 增强信号：scale(expr), normalize(expr)
-- 添加动量：ts_delta(expr, 5), ts_momentum(expr, 5)
-- 组合信号：0.5 * expr1 + 0.5 * expr2
 
 ### HIGH_TURNOVER (换手率过高)
 问题：交易频率过高
@@ -73,13 +82,53 @@ OPTIMIZATION_PROMPT = """
 - 降低频率：ts_mean(expr, 10), ts_delay(expr, 1)
 - 持仓平滑：ts_decay_linear(expr, 5)
 - 减少噪音：ts_rank(expr, 20)
+- 增加时间窗口参数
+
+### LOW_TURNOVER (换手率过低)
+问题：交易频率过低，信号衰减
+解决：
+- 缩短时间窗口
+- 使用更敏感的操作符：ts_delta(expr, 1)
+- 减少平滑层
+
+## 高级技术（来自 WorldQuant Brain 指南）
+
+### 中性化选项
+- group_neutralize(expr, industry) - 行业中性化
+- group_neutralize(expr, sector) - 板块中性化
+- group_neutralize(expr, subindustry) - 子行业中性化
+- regression_neut(expr, factor) - 回归中性化（用于 Size, Beta, Momentum）
+
+### 仓位分布操作符
+- rank(expr) - 均匀分布（推荐）
+- signed_power(expr, 0.5-0.8) - 更极端分布，更高波动
+- log(1 + abs(expr)) * sign(expr) - 对数分布
+
+### Alpha 协同
+- Trade_when(A1 > x, A2, A1 <= x) - 条件组合
+- 避免简单线性组合如 3*A1 + 4*A2（不利于分散化）
+
+## 成功模板参考
+以下模板已验证成功，可作为优化参考：
+1. rank(ts_zscore(divide(fundamental_field, cap), 40-80))
+2. ts_rank(divide(market_field, cap), 60)
+3. group_neutralize(ts_decay_linear(ts_rank(signal, 20-60), 5-10), industry)
+4. group_rank(ts_rank(ratio_field, 60), industry)
+5. signed_power(group_neutralize(expr, industry), 0.6)
 
 ## 可用数据字段（部分）
 close, open, high, low, volume, vwap, returns, cap, sharesout, adv20
+fnd6_mfma2_oancf, operating_income, est_eps, implied_volatility_call_120, implied_volatility_put_120
+
+## 过拟合警告
+- 不要过度微调细节来提高 In-Sample 性能 - 会导致 Out-Sample 性能差
+- 不要让仓位过于集中在少数工具
+- 关注经济意义和稳健性，而不仅仅是高 fitness 分数
 
 ## 输出要求
 直接输出优化后的 Alpha 表达式，不要包含解释或注释。
 保持 FASTEXPR 格式，确保语法正确。
+优化后的表达式必须包含外层 rank/ts_rank/group_rank 操作符。
 
 优化后的表达式：
 """
