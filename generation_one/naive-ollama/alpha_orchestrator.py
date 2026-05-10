@@ -630,60 +630,8 @@ class AlphaOrchestrator:
         logger.info(f"Can submit today. Last submission was: {self.last_submission_date}")
         return True
 
-    def run_alpha_expression_miner(self, promising_alpha_file: str = "hopeful_alphas.json"):
-        """Run alpha expression miner on promising alphas."""
-        logger.info("Starting alpha expression miner on promising alphas...")
-        
-        if not os.path.exists(promising_alpha_file):
-            logger.warning(f"Promising alphas file {promising_alpha_file} not found. Skipping mining.")
-            return
-        
-        try:
-            with open(promising_alpha_file, 'r') as f:
-                promising_alphas = json.load(f)
-            
-            if not promising_alphas:
-                logger.info("No promising alphas found. Skipping mining.")
-                return
-            
-            logger.info(f"Found {len(promising_alphas)} promising alphas to mine")
-            
-            # Run alpha expression miner for each promising alpha
-            # Note: The miner will automatically remove successfully mined alphas from hopeful_alphas.json
-            for i, alpha_data in enumerate(promising_alphas, 1):
-                expression = alpha_data.get('expression', '')
-                if not expression:
-                    continue
-                
-                logger.info(f"Mining alpha {i}/{len(promising_alphas)}: {expression[:100]}...")
-                
-                # Run the alpha expression miner as a subprocess
-                try:
-                    result = subprocess.run([
-                        sys.executable, 'alpha_expression_miner.py',
-                        '--credentials', self.credentials_path,
-                        '--expression', expression,
-                        '--auto-mode',  # Run in automated mode
-                        '--output-file', f'mining_results_{i}.json'
-                    ], capture_output=True, text=True, timeout=3000)
-                    
-                    if result.returncode == 0:
-                        logger.info(f"Successfully mined alpha {i}")
-                        # The alpha will be automatically removed from hopeful_alphas.json by the miner
-                    else:
-                        logger.error(f"Failed to mine alpha {i}: {result.stderr}")
-                        # Failed alphas remain in hopeful_alphas.json for retry
-                        
-                except subprocess.TimeoutExpired:
-                    logger.error(f"Mining alpha {i} timed out")
-                except Exception as e:
-                    logger.error(f"Error mining alpha {i}: {e}")
-                
-                # Small delay between mining operations
-                time.sleep(5)
-                
-        except Exception as e:
-            logger.error(f"Error running alpha expression miner: {e}")
+    # run_alpha_expression_miner removed - no longer needed
+    # Online LLM generates high quality alphas, no need for variation mining
 
     def run_alpha_submitter(self, batch_size: int = 5):
         """Run alpha submitter with daily rate limiting."""
@@ -764,7 +712,7 @@ class AlphaOrchestrator:
                 '--ollama-url', self.ollama_url,
                 '--ollama-model', current_model,
                 '--max-concurrent', str(self.max_concurrent_simulations)
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            ])  # 不捕获输出，让子进程继承父进程的 stdout/stderr
 
             # 添加到子进程跟踪列表
             self._child_processes.append(self.generator_process)
@@ -773,35 +721,7 @@ class AlphaOrchestrator:
         except Exception as e:
             logger.error(f"Error starting alpha generator: {e}")
 
-    def start_alpha_expression_miner_continuous(self, check_interval: int = 300):
-        """Start alpha expression miner in continuous mode."""
-        logger.info("Starting alpha expression miner in continuous mode...")
-        
-        while self.running:
-            try:
-                # Check if hopeful_alphas.json exists and has content
-                if os.path.exists("hopeful_alphas.json"):
-                    try:
-                        with open("hopeful_alphas.json", 'r') as f:
-                            alphas = json.load(f)
-                            if alphas and len(alphas) > 0:
-                                logger.info(f"Found {len(alphas)} alphas to mine")
-                                self.run_alpha_expression_miner()
-                            else:
-                                logger.info("No alphas found in hopeful_alphas.json")
-                    except json.JSONDecodeError:
-                        logger.warning("hopeful_alphas.json is not valid JSON, waiting for valid data...")
-                    except Exception as e:
-                        logger.error(f"Error reading hopeful_alphas.json: {e}")
-                else:
-                    logger.info("hopeful_alphas.json not found yet, waiting for alpha generator to create promising alphas...")
-                
-                # Wait before next check
-                time.sleep(check_interval)
-                
-            except Exception as e:
-                logger.error(f"Error in continuous miner: {e}")
-                time.sleep(check_interval)
+    # start_alpha_expression_miner_continuous removed - no longer needed
 
     def restart_all_processes(self):
         """Restart all running processes to prevent stuck jobs."""
@@ -890,8 +810,8 @@ class AlphaOrchestrator:
         logger.info("Daily workflow completed")
 
     def continuous_mining(self, mining_interval_hours: int = 6):
-        """Run continuous mining with concurrent alpha generation and expression mining."""
-        logger.info(f"Starting continuous mining with {mining_interval_hours}h intervals...")
+        """Run continuous mining with alpha generation only (miner step removed)."""
+        logger.info(f"Starting continuous mining...")
 
         try:
             # Start VRAM monitoring (仅 Ollama 模式)
@@ -908,18 +828,10 @@ class AlphaOrchestrator:
             # Start alpha generator in continuous mode
             self.start_alpha_generator_continuous(batch_size=3, sleep_time=30)
 
-            # Start alpha expression miner in a separate thread
-            miner_thread = threading.Thread(
-                target=self.start_alpha_expression_miner_continuous,
-                args=(mining_interval_hours * 3600,),  # Convert hours to seconds
-                daemon=True
-            )
-            miner_thread.start()
-
             # Schedule daily submission at 2 PM
             schedule.every().day.at("14:00").do(self.run_alpha_submitter)
 
-            logger.info("Both alpha generator and expression miner are running concurrently")
+            logger.info("Alpha generator is running (miner step removed - using online LLM generates high quality alphas)")
             logger.info(f"Max concurrent simulations: {self.max_concurrent_simulations}")
             if self.use_online_llm:
                 logger.info(f"Using online LLM: {self.llm_client.get_model_name()}")
@@ -948,15 +860,13 @@ class AlphaOrchestrator:
             self.stop_processes()
 
 def main():
-    parser = argparse.ArgumentParser(description='Alpha Orchestrator - Manage alpha generation, mining, and submission')
+    parser = argparse.ArgumentParser(description='Alpha Orchestrator - Manage alpha generation and submission')
     parser.add_argument('--credentials', type=str, default='./credential.txt',
                       help='Path to credentials file (default: ./credential.txt)')
     parser.add_argument('--ollama-url', type=str, default='http://localhost:11434',
                       help='Ollama API URL (default: http://localhost:11434)')
-    parser.add_argument('--mode', type=str, choices=['daily', 'continuous', 'miner', 'submitter', 'generator', 'fleet-status', 'fleet-reset', 'fleet-downgrade', 'fleet-reset-app', 'restart', 'select-model'],
+    parser.add_argument('--mode', type=str, choices=['daily', 'continuous', 'submitter', 'generator', 'fleet-status', 'fleet-reset', 'fleet-downgrade', 'fleet-reset-app', 'restart', 'select-model'],
                       default='continuous', help='Operation mode (default: continuous)')
-    parser.add_argument('--mining-interval', type=int, default=None,
-                      help='Mining interval in hours for continuous mode (default: from config or 6)')
     parser.add_argument('--batch-size', type=int, default=None,
                       help='Batch size for operations (default: from config or 3)')
     parser.add_argument('--max-concurrent', type=int, default=None,
@@ -989,7 +899,6 @@ def main():
         config = config_manager.config
 
     # 确定参数值（命令行 > 配置文件 > 默认值）
-    mining_interval = args.mining_interval or (config.mining_interval_hours if config else 6)
     batch_size = args.batch_size or (config.batch_size if config else 3)
     max_concurrent = args.max_concurrent or (config.max_concurrent if config else 3)
     ollama_model = args.ollama_model or (config.default_model if config else 'llama3:8b')
@@ -1019,14 +928,11 @@ def main():
         logger.info(f"  - 模型: {ollama_model}")
         logger.info(f"  - 批次大小: {batch_size}")
         logger.info(f"  - 最大并发: {max_concurrent}")
-        logger.info(f"  - 挖掘间隔: {mining_interval} 小时")
 
         if args.mode == 'daily':
             orchestrator.daily_workflow()
         elif args.mode == 'continuous':
-            orchestrator.continuous_mining(mining_interval)
-        elif args.mode == 'miner':
-            orchestrator.run_alpha_expression_miner()
+            orchestrator.continuous_mining()
         elif args.mode == 'submitter':
             orchestrator.run_alpha_submitter(batch_size)
         elif args.mode == 'generator':

@@ -21,7 +21,47 @@ class AlphaExpressionMiner:
         logger.info("Initializing AlphaExpressionMiner")
         self.sess = requests.Session()
         self.setup_auth(credentials_path)
-        
+        self.simulated_file = 'simulated_expressions.json'
+
+    def _is_already_simulated(self, expression: str) -> bool:
+        """检查公式是否已经模拟过"""
+        if not os.path.exists(self.simulated_file):
+            return False
+
+        try:
+            with open(self.simulated_file, 'r') as f:
+                simulated = json.load(f)
+            for entry in simulated:
+                if entry.get('expression') == expression:
+                    return True
+            return False
+        except (json.JSONDecodeError, FileNotFoundError):
+            return False
+
+    def _record_simulation(self, expression: str, sim_id: str, status: str = "submitted") -> None:
+        """记录已提交的模拟"""
+        existing = []
+        if os.path.exists(self.simulated_file):
+            try:
+                with open(self.simulated_file, 'r') as f:
+                    existing = json.load(f)
+            except json.JSONDecodeError:
+                pass
+
+        entry = {
+            "expression": expression,
+            "simulation_id": sim_id,
+            "timestamp": int(time.time()),
+            "status": status
+        }
+        existing.append(entry)
+
+        if len(existing) > 1000:
+            existing = existing[-1000:]
+
+        with open(self.simulated_file, 'w') as f:
+            json.dump(existing, f, indent=2)
+
     def setup_auth(self, credentials_path: str) -> None:
         """Set up authentication with WorldQuant Brain."""
         logger.info(f"Loading credentials from {credentials_path}")
@@ -240,6 +280,11 @@ class AlphaExpressionMiner:
 
     def test_alpha(self, alpha_expression: str, retry_on_limit: bool = True) -> Dict:
         """Test an alpha expression using WorldQuant Brain simulation."""
+        # 检查是否已经模拟过
+        if self._is_already_simulated(alpha_expression):
+            logger.info(f"Alpha already simulated, skipping: {alpha_expression[:50]}...")
+            return {"status": "skipped", "message": "Alpha already simulated"}
+
         logger.info(f"Testing alpha: {alpha_expression}")
 
         simulation_data = {
@@ -306,15 +351,28 @@ class AlphaExpressionMiner:
         if not sim_progress_url:
             logger.error("No simulation ID received in response headers")
             return {"status": "error", "message": "No simulation ID received"}
-        
+
+        # 提取模拟 ID 并记录
+        sim_id = sim_progress_url.rstrip('/').split('/')[-1]
+        self._record_simulation(alpha_expression, sim_id, "submitted")
+
         logger.info(f"Monitoring simulation at: {sim_progress_url}")
-        
-        # Monitor simulation progress
+
+        # Monitor simulation progress with timeout
         retry_count = 0
         max_retries = 3
+        max_wait_time = 1200  # 最多等待 20 分钟
+        start_time = time.time()
+
         while True:
+            # 检查是否超时
+            elapsed_time = time.time() - start_time
+            if elapsed_time > max_wait_time:
+                logger.error(f"Simulation monitoring timed out after {elapsed_time:.0f} seconds")
+                return {"status": "error", "message": f"Simulation timed out after {max_wait_time}s", "code": "timeout"}
+
             try:
-                sim_progress_resp = self.sess.get(sim_progress_url)
+                sim_progress_resp = self.sess.get(sim_progress_url, timeout=30)
                 
                 # Handle empty response
                 if not sim_progress_resp.text.strip():
@@ -370,9 +428,6 @@ def main():
                       help='Output file for results (default: mined_expressions.json)')
     
     args = parser.parse_args()
-    
-    # Update log level if specified
-    logging.getLogger().setLevel(getattr(logging, args.log_level))
     
     logger.info(f"Starting alpha expression mining with parameters:")
     logger.info(f"Expression: {args.expression}")

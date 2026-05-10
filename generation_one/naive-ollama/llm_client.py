@@ -79,7 +79,7 @@ class LLMClient:
         self.api_key = os.environ.get("LLM_API_KEY", llm_config.get("api_key", ""))
         self.base_url = os.environ.get("LLM_BASE_URL", llm_config.get("base_url", "https://cmkey.cn"))
         self.model = os.environ.get("LLM_MODEL", llm_config.get("model", "glm-5.1"))
-        self.max_tokens = llm_config.get("max_tokens", 4096)
+        self.max_tokens = llm_config.get("max_tokens", 40960)
 
         # 尝试导入 anthropic 库
         self.client = None
@@ -191,7 +191,7 @@ class LLMClient:
             "prompt": prompt,
             "stream": False,
             "temperature": temperature,
-            "num_predict": max_tokens or 1000
+            "num_predict": max_tokens or 40960
         }
 
         try:

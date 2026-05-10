@@ -63,7 +63,7 @@ def get_data_fields(self):
 ```python
 def generate_alpha_ideas_with_ollama(self, data_fields, operators):
     """使用 Ollama 生成 Alpha 表达式"""
-    prompt = f"""Generate 5 unique alpha factor expressions...
+    prompt = f"""Generate 20 unique alpha factor expressions...
     Available Data Fields: {[field['id'] for field in data_fields]}
     Available Operators: {operators}
     """

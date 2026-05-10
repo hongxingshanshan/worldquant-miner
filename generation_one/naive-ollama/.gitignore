@@ -9,6 +9,12 @@ credential.example.txt
 results/
 logs/
 *.log
+# Module-specific log files
+alpha_generator_ollama.log
+alpha_orchestrator.log
+web_dashboard.log
+llm_client.log
+config_manager.log
 
 # Python
 __pycache__/
@@ -59,3 +65,5 @@ desktop.ini
 *.tmp
 *.temp
 hopeful_alphas.json
+simulated_expressions.json
+simulation_errors.json

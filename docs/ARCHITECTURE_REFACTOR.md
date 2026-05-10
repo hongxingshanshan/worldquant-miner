@@ -420,7 +420,7 @@ class BaseLLMClient(ABC):
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: float = 0.3,
-        max_tokens: int = 1000,
+        max_tokens: int = 40960,
         **kwargs
     ) -> str:
         """生成文本"""

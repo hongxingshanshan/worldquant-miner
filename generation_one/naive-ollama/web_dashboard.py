@@ -17,13 +17,12 @@ from requests.auth import HTTPBasicAuth
 
 app = Flask(__name__)
 
-# 使用统一日志配置
-try:
-    from logging_config import get_logger
-    logger = get_logger(__name__)
-except ImportError:
-    import logging
-    logger = logging.getLogger(__name__)
+# Web Dashboard 不写入日志，只读取日志进行监控
+# 使用标准 logging，不导入统一日志配置
+import logging
+logger = logging.getLogger(__name__)
+# 设置为 WARNING 级别，只输出错误，不干扰主程序日志
+logger.setLevel(logging.WARNING)
 
 class AlphaDashboard:
     def __init__(self):
@@ -845,7 +844,6 @@ if __name__ == '__main__':
 
     print("Starting Alpha Generator Dashboard...")
     print("Dashboard will be available at: http://localhost:5000")
-    print("Ollama WebUI: http://localhost:3000")
     print("Ollama API: http://localhost:11434")
 
     app.run(host='0.0.0.0', port=5000, debug=True)
