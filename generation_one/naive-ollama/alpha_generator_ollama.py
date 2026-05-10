@@ -660,14 +660,43 @@ class AlphaConsumer(Thread):
                 sleep(5)
 
         # 将未提交的 Alpha 放回队列头部（优先处理）
-        if unsubmitted_items and self.generator.alpha_queue:
-            # 使用 deque 的 extendleft 将 Alpha 放回队列头部
-            # 注意：extendleft 会反转顺序，所以需要先反转列表
-            for item in reversed(unsubmitted_items):
-                self.generator.alpha_queue.queue.appendleft(item)
-            logger.info(f"🔄 已将 {len(unsubmitted_items)} 个 Alpha 放回队列头部，当前队列大小: {len(self.generator.alpha_queue)}")
+        # 先过滤掉重复的和已模拟的
+        valid_items = []
+        skipped_duplicates = 0
+        skipped_simulated = 0
 
-        logger.info(f"📊 批次提交完成: {submitted}/{len(batch)} 成功, {len(unsubmitted_items)} 放回队列")
+        for item in unsubmitted_items:
+            alpha = item["expression"]
+
+            # 1. 检查是否已在队列中（避免重复）
+            if self.generator.alpha_queue:
+                is_duplicate = any(
+                    existing["expression"] == alpha
+                    for existing in self.generator.alpha_queue.queue
+                )
+                if is_duplicate:
+                    skipped_duplicates += 1
+                    logger.debug(f"跳过重复: {alpha[:50]}...")
+                    continue
+
+            # 2. 检查是否已经模拟过
+            if self.generator._is_already_simulated(alpha):
+                skipped_simulated += 1
+                logger.debug(f"跳过已模拟: {alpha[:50]}...")
+                continue
+
+            valid_items.append(item)
+
+        # 放回队列头部
+        if valid_items and self.generator.alpha_queue:
+            for item in reversed(valid_items):
+                self.generator.alpha_queue.queue.appendleft(item)
+            logger.info(f"🔄 已将 {len(valid_items)} 个 Alpha 放回队列头部")
+
+        if skipped_duplicates > 0 or skipped_simulated > 0:
+            logger.info(f"📋 放回时过滤: {skipped_duplicates} 个重复, {skipped_simulated} 个已模拟")
+
+        logger.info(f"📊 批次提交完成: {submitted}/{len(batch)} 成功, {len(valid_items)} 放回队列")
 
     def stop(self):
         """停止消费者线程"""
