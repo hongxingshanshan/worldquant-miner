@@ -629,7 +629,7 @@ class AlphaDashboard:
                 params={
                     'limit': limit * 2,
                     'offset': 0,
-                    'order': '-is.sharpe',
+                    'order': '-dateCreated',
                     'hidden': 'false'
                 },
                 timeout=30

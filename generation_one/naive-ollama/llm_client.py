@@ -129,27 +129,22 @@ class LLMClient:
         max_tokens = max_tokens or self.max_tokens
 
         if self.client:
-            # 使用 anthropic SDK
+            # 使用 anthropic SDK（启用流式传输以支持长时间操作）
             try:
-                response = self.client.messages.create(
+                with self.client.messages.stream(
                     model=self.model,
                     max_tokens=max_tokens,
                     system=system_prompt or "",
                     messages=[{"role": "user", "content": prompt}],
                     temperature=temperature
-                )
-                # 处理不同类型的 content block（GLM-5.1 可能返回 ThinkingBlock）
-                text_parts = []
-                for block in response.content:
-                    # 检查 block 类型
-                    if hasattr(block, 'text'):
-                        text_parts.append(block.text)
-                    elif hasattr(block, 'type') and block.type == 'text':
-                        text_parts.append(block.text)
-                    # 跳过 ThinkingBlock 等其他类型
-                return "".join(text_parts)
+                ) as stream:
+                    # 收集所有文本块
+                    text_parts = []
+                    for text in stream.text_stream:
+                        text_parts.append(text)
+                    return "".join(text_parts)
             except Exception as e:
-                logger.error(f"anthropic SDK 调用失败: {e}，尝试使用 requests")
+                logger.error(f"anthropic SDK 流式调用失败: {e}，尝试使用 requests")
                 # 降级到 requests 方式
 
         # 使用 requests 直接调用

@@ -661,6 +661,7 @@ class AlphaOrchestrator:
                 try:
                     result = subprocess.run([
                         sys.executable, 'alpha_expression_miner.py',
+                        '--credentials', self.credentials_path,
                         '--expression', expression,
                         '--auto-mode',  # Run in automated mode
                         '--output-file', f'mining_results_{i}.json'
