@@ -293,6 +293,62 @@ def extract_key_sections(content: str, key_sections: List[str], randomize: bool 
     return '\n\n'.join(result)
 
 
+def get_sampled_field_ids(max_fields: int = 100, randomize: bool = True) -> List[str]:
+    """获取采样的数据字段 ID 列表，用于 prompt
+
+    Args:
+        max_fields: 最大字段数量
+        randomize: 是否随机选择（否则按覆盖率排序）
+
+    Returns:
+        字段 ID 列表
+    """
+    fields_file = os.path.join(KNOWLEDGE_BASE_PATH, "worldquant_data_fields.json")
+
+    if not os.path.exists(fields_file):
+        return []
+
+    try:
+        with open(fields_file, 'r', encoding='utf-8') as f:
+            all_fields = json.load(f)
+
+        # 按数据集分组
+        datasets = {}
+        for field in all_fields:
+            dataset_name = field.get('dataset', {}).get('name', 'Unknown')
+            if dataset_name not in datasets:
+                datasets[dataset_name] = []
+            datasets[dataset_name].append({
+                'id': field.get('id'),
+                'coverage': field.get('coverage', 0)
+            })
+
+        # 从每个数据集选择高覆盖率字段
+        selected_ids = []
+        for dataset_name, fields in datasets.items():
+            if randomize:
+                shuffled = fields.copy()
+                random.shuffle(shuffled)
+                for field in shuffled[:10]:
+                    selected_ids.append(field['id'])
+                    if len(selected_ids) >= max_fields:
+                        break
+            else:
+                sorted_fields = sorted(fields, key=lambda x: x['coverage'], reverse=True)
+                for field in sorted_fields[:10]:
+                    selected_ids.append(field['id'])
+                    if len(selected_ids) >= max_fields:
+                        break
+            if len(selected_ids) >= max_fields:
+                break
+
+        return selected_ids
+
+    except Exception as e:
+        logger.warning(f"Failed to sample field IDs: {e}")
+        return []
+
+
 def load_data_fields_reference(max_fields: int = 80, randomize: bool = True) -> str:
     """加载数据字段参考，用于 prompt 增强，支持随机化字段顺序
 
@@ -447,6 +503,177 @@ class RetryQueue:
                     
             time.sleep(1)  # Prevent busy waiting
 
+
+class AlphaConsumer(Thread):
+    """消费者线程：持续从队列获取 Alpha 并提交测试
+
+    与生产者（生成/优化）解耦，独立运行
+    """
+
+    def __init__(self, generator, check_interval: int = 5, batch_size: int = 10):
+        super().__init__(daemon=True)
+        self.generator = generator
+        self.check_interval = check_interval  # 检查队列的间隔（秒）
+        self.batch_size = batch_size  # 每次批量提交的数量
+        self.running = True
+        self.name = "AlphaConsumer"
+
+    def run(self):
+        """消费者主循环"""
+        logger.info("🚀 Alpha 消费者线程启动")
+        consecutive_rate_limits = 0  # 连续限流计数
+
+        while self.running:
+            try:
+                # 1. 检查队列中是否有待测试的 Alpha
+                if self.generator.alpha_queue:
+                    queue_size = len(self.generator.alpha_queue)
+                    if queue_size > 0:
+                        # 如果之前连续限流，增加等待时间
+                        if consecutive_rate_limits > 0:
+                            wait_time = min(30, 5 * consecutive_rate_limits)
+                            logger.info(f"⏳ 检测到连续限流，等待 {wait_time} 秒后重试...")
+                            sleep(wait_time)
+
+                        logger.info(f"📦 队列中有 {queue_size} 个待测试 Alpha")
+
+                        # 获取一批 Alpha
+                        batch = self.generator.alpha_queue.get_next_batch(batch_size=self.batch_size)
+                        if batch:
+                            batch_size_before = len(batch)
+                            self._submit_batch(batch)
+
+                            # 输出当前队列剩余数量
+                            if self.generator.alpha_queue:
+                                remaining = len(self.generator.alpha_queue)
+                                logger.info(f"📋 当前队列剩余: {remaining} 个 Alpha 待测试")
+
+                            # 检查是否有限流发生（通过队列大小变化判断）
+                            if self.generator.alpha_queue:
+                                current_queue_size = len(self.generator.alpha_queue)
+                                # 如果队列大小增加，说明有 Alpha 被放回
+                                if current_queue_size > queue_size - batch_size_before:
+                                    consecutive_rate_limits += 1
+                                    logger.warning(f"🚫 检测到限流，连续限流次数: {consecutive_rate_limits}")
+                                else:
+                                    consecutive_rate_limits = 0  # 重置计数
+
+                # 2. 检查待处理结果
+                if self.generator.pending_results:
+                    pending_count = len(self.generator.pending_results)
+                    if pending_count > 0:
+                        logger.info(f"⏳ 检查 {pending_count} 个待处理模拟结果")
+                        self.generator.check_pending_results_with_source()
+
+                # 3. 等待下一轮（如果限流则等待更长时间）
+                base_interval = self.check_interval
+                if consecutive_rate_limits > 0:
+                    base_interval = min(30, self.check_interval * (1 + consecutive_rate_limits))
+                sleep(base_interval)
+
+            except Exception as e:
+                logger.error(f"消费者线程错误: {e}")
+                sleep(10)  # 错误后等待更长时间
+
+        logger.info("🛑 Alpha 消费者线程停止")
+
+    def _submit_batch(self, batch: List[Dict]):
+        """提交一批 Alpha 进行测试
+
+        限流时将未提交的 Alpha 放回队列头部，避免浪费
+        """
+        logger.info(f"📤 提交 {len(batch)} 个 Alpha 进行测试")
+
+        max_concurrent = self.generator.executor._max_workers
+        submitted = 0
+        rate_limited = False  # 标记是否遇到限流
+        unsubmitted_items = []  # 未成功提交的 Alpha
+
+        for i in range(0, len(batch), max_concurrent):
+            chunk = batch[i:i + max_concurrent]
+
+            # 如果已经遇到限流，直接将剩余 Alpha 放回队列
+            if rate_limited:
+                unsubmitted_items.extend(chunk)
+                logger.info(f"⚠️ 因限流，{len(chunk)} 个 Alpha 将放回队列")
+                continue
+
+            futures = []
+            for item in chunk:
+                alpha = item["expression"]
+                future = self.generator.executor.submit(
+                    self.generator._test_alpha_impl, alpha
+                )
+                futures.append((item, future))
+
+            # 处理结果
+            for item, future in futures:
+                alpha = item["expression"]
+                try:
+                    result = future.result()
+
+                    if result.get("status") == "error":
+                        error_msg = result.get("message", "")
+                        if "SIMULATION_LIMIT_EXCEEDED" in error_msg or "429" in error_msg or "CONCURRENT" in error_msg:
+                            # 限流：将 Alpha 放回队列头部
+                            rate_limited = True
+                            unsubmitted_items.append(item)
+                            logger.warning(f"🚫 限流: {alpha[:50]}... 将放回队列")
+                        else:
+                            logger.error(f"模拟错误: {error_msg}")
+                            # 记录失败
+                            if self.generator.alpha_queue:
+                                self.generator.alpha_queue.record_result(item, {
+                                    "passed": False,
+                                    "error": error_msg
+                                })
+                        continue
+
+                    sim_id = result.get("result", {}).get("id")
+                    progress_url = result.get("result", {}).get("progress_url")
+
+                    if sim_id and progress_url:
+                        self.generator.pending_results[sim_id] = {
+                            "alpha": alpha,
+                            "progress_url": progress_url,
+                            "status": "pending",
+                            "attempts": 0,
+                            "source": item.get("source", "unknown"),
+                            "original_alpha": item.get("original_alpha"),
+                            "opt_type": item.get("optimization_type"),
+                            "queue_item": item
+                        }
+                        submitted += 1
+                        logger.info(f"✅ 提交成功: {alpha[:50]}... (ID: {sim_id})")
+                    else:
+                        # 没有获得 sim_id，也算失败，放回队列
+                        unsubmitted_items.append(item)
+                        logger.warning(f"⚠️ 未获得模拟ID: {alpha[:50]}... 将放回队列")
+
+                except Exception as e:
+                    logger.error(f"提交错误 {alpha[:50]}: {e}")
+                    # 异常情况也放回队列
+                    unsubmitted_items.append(item)
+
+            # 批次间等待
+            if i + max_concurrent < len(batch) and not rate_limited:
+                sleep(5)
+
+        # 将未提交的 Alpha 放回队列头部（优先处理）
+        if unsubmitted_items and self.generator.alpha_queue:
+            # 使用 deque 的 extendleft 将 Alpha 放回队列头部
+            # 注意：extendleft 会反转顺序，所以需要先反转列表
+            for item in reversed(unsubmitted_items):
+                self.generator.alpha_queue.queue.appendleft(item)
+            logger.info(f"🔄 已将 {len(unsubmitted_items)} 个 Alpha 放回队列头部，当前队列大小: {len(self.generator.alpha_queue)}")
+
+        logger.info(f"📊 批次提交完成: {submitted}/{len(batch)} 成功, {len(unsubmitted_items)} 放回队列")
+
+    def stop(self):
+        """停止消费者线程"""
+        self.running = False
+
+
 class AlphaGenerator:
     def __init__(self, credentials_path: str = "credential.txt", ollama_url: str = "http://localhost:11434", max_concurrent: int = 2, config_path: str = "config.json"):
         self.sess = requests.Session()
@@ -475,15 +702,24 @@ class AlphaGenerator:
         self.optimizer = None
         self.alpha_queue = None
         self.optimization_enabled = False
+        self.consumer_thread = None  # 消费者线程
+
+        logger.info(f"OPTIMIZER_AVAILABLE: {OPTIMIZER_AVAILABLE}, llm_client: {self.llm_client is not None}")
+
         if OPTIMIZER_AVAILABLE and self.llm_client:
             try:
                 self.optimizer = AlphaOptimizer(self.llm_client)
                 self.alpha_queue = AlphaQueue()
+                logger.info(f"✅ AlphaQueue 初始化成功, self.alpha_queue = {self.alpha_queue}, id(self) = {id(self)}")
                 # 从配置加载优化设置
                 self._load_optimization_config()
                 logger.info(f"优化器初始化成功 - 启用: {self.optimization_enabled}")
             except Exception as e:
                 logger.warning(f"优化器初始化失败: {e}")
+                import traceback
+                logger.warning(traceback.format_exc())
+        else:
+            logger.warning(f"优化器未初始化: OPTIMIZER_AVAILABLE={OPTIMIZER_AVAILABLE}, llm_client={self.llm_client is not None}")
 
         # 从配置文件加载模型舰队
         self.model_fleet = self._load_model_fleet()
@@ -545,32 +781,94 @@ class AlphaGenerator:
         
     def setup_auth(self, credentials_path: str) -> None:
         """Set up authentication with WorldQuant Brain."""
-        logging.info(f"Loading credentials from {credentials_path}")
+        logger.info(f"Loading credentials from {credentials_path}")
         with open(credentials_path) as f:
             credentials = json.load(f)
         
         username, password = credentials
         self.sess.auth = HTTPBasicAuth(username, password)
         
-        logging.info("Authenticating with WorldQuant Brain...")
+        logger.info("Authenticating with WorldQuant Brain...")
         response = self.sess.post('https://api.worldquantbrain.com/authentication', timeout=30)
-        logging.info(f"Authentication response status: {response.status_code}")
-        logging.debug(f"Authentication response: {response.text[:500]}...")
+        logger.info(f"Authentication response status: {response.status_code}")
+        logger.debug(f"Authentication response: {response.text[:500]}...")
         
         if response.status_code != 201:
             raise Exception(f"Authentication failed: {response.text}")
-    
+
+    def start_consumer_thread(self, check_interval: int = 5, batch_size: int = 10):
+        """启动消费者线程
+
+        Args:
+            check_interval: 检查队列的间隔（秒）
+            batch_size: 每次批量提交的数量
+        """
+        if self.consumer_thread and self.consumer_thread.is_alive():
+            logger.warning("消费者线程已在运行")
+            return
+
+        self.consumer_thread = AlphaConsumer(
+            generator=self,
+            check_interval=check_interval,
+            batch_size=batch_size
+        )
+        self.consumer_thread.start()
+        logger.info("消费者线程已启动")
+
+    def stop_consumer_thread(self):
+        """停止消费者线程"""
+        if self.consumer_thread:
+            self.consumer_thread.stop()
+            self.consumer_thread.join(timeout=10)
+            logger.info("消费者线程已停止")
+
     def cleanup_vram(self):
         """Perform VRAM cleanup by forcing garbage collection and waiting."""
         try:
             import gc
             gc.collect()
-            logging.info("Performed VRAM cleanup")
+            logger.info("Performed VRAM cleanup")
             # Add a small delay to allow GPU memory to be freed
             time.sleep(2)
         except Exception as e:
-            logging.warning(f"VRAM cleanup failed: {e}")
-        
+            logger.warning(f"VRAM cleanup failed: {e}")
+
+    def get_data_fields_from_local(self) -> List[Dict]:
+        """从本地知识库加载数据字段"""
+        knowledge_base_path = os.path.join(os.path.dirname(__file__), '..', '..', 'knowledge_base')
+        data_fields_file = os.path.join(knowledge_base_path, 'worldquant_data_fields.json')
+
+        if os.path.exists(data_fields_file):
+            try:
+                with open(data_fields_file, 'r', encoding='utf-8') as f:
+                    data_fields = json.load(f)
+                logger.info(f"[数据字段] 从本地知识库加载成功，共 {len(data_fields)} 个字段")
+                return data_fields
+            except Exception as e:
+                logger.warning(f"[数据字段] 本地加载失败: {e}，将尝试从 API 获取")
+                return None
+        else:
+            logger.warning(f"[数据字段] 知识库文件不存在: {data_fields_file}")
+            return None
+
+    def get_operators_from_local(self) -> List[Dict]:
+        """从本地知识库加载操作符"""
+        knowledge_base_path = os.path.join(os.path.dirname(__file__), '..', '..', 'knowledge_base')
+        operators_file = os.path.join(knowledge_base_path, 'worldquant_operators.json')
+
+        if os.path.exists(operators_file):
+            try:
+                with open(operators_file, 'r', encoding='utf-8') as f:
+                    operators = json.load(f)
+                logger.info(f"[操作符] 从本地知识库加载成功，共 {len(operators)} 个操作符")
+                return operators
+            except Exception as e:
+                logger.warning(f"[操作符] 本地加载失败: {e}，将尝试从 API 获取")
+                return None
+        else:
+            logger.warning(f"[操作符] 知识库文件不存在: {operators_file}")
+            return None
+
     def get_data_fields(self) -> List[Dict]:
         """Fetch available data fields from WorldQuant Brain across multiple datasets with random sampling.
 
@@ -590,10 +888,10 @@ class AlphaGenerator:
 
         try:
             total_datasets = len(datasets)
-            print(f"[数据字段获取] 开始获取数据字段，共 {total_datasets} 个数据集...")
+            logger.info(f"[数据字段获取] 开始获取数据字段，共 {total_datasets} 个数据集...")
 
             for idx, dataset in enumerate(datasets, 1):
-                print(f"[数据字段获取]   [{idx}/{total_datasets}] 正在处理数据集: {dataset}")
+                logger.info(f"[数据字段获取]   [{idx}/{total_datasets}] 正在处理数据集: {dataset}")
 
                 # First get the count
                 params = base_params.copy()
@@ -601,12 +899,26 @@ class AlphaGenerator:
                 params['limit'] = 1  # Just to get count efficiently
 
                 time.sleep(api_request_delay)  # 请求前等待
-                count_response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params, timeout=30)
+                logger.info(f"[数据字段获取]     正在请求字段数量...")
+                try:
+                    count_response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params, timeout=30)
+                    logger.info(f"[数据字段获取]     字段数量请求完成，状态码: {count_response.status_code}")
+                except requests.exceptions.Timeout:
+                    logger.warning(f"[数据字段获取]     ⚠ 请求超时，跳过数据集: {dataset}")
+                    continue
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"[数据字段获取]     ⚠ 请求失败: {e}，跳过数据集: {dataset}")
+                    continue
 
                 if count_response.status_code == 200:
-                    count_data = count_response.json()
+                    try:
+                        count_data = count_response.json()
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[数据字段获取]     ⚠ JSON 解析失败: {e}，跳过数据集: {dataset}")
+                        continue
+
                     total_fields = count_data.get('count', 0)
-                    print(f"[数据字段获取]     字段总数: {total_fields}")
+                    logger.info(f"[数据字段获取]     字段总数: {total_fields}")
 
                     if total_fields > 0:
                         # Generate random offset
@@ -618,21 +930,36 @@ class AlphaGenerator:
                         params['limit'] = min(20, total_fields)  # Don't exceed total fields
 
                         time.sleep(api_request_delay)  # 请求前等待
-                        response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params, timeout=30)
+                        logger.info(f"[数据字段获取]     正在请求字段列表 (offset={random_offset})...")
+                        try:
+                            response = self.sess.get('https://api.worldquantbrain.com/data-fields', params=params, timeout=30)
+                            logger.info(f"[数据字段获取]     字段列表请求完成，状态码: {response.status_code}")
+                        except requests.exceptions.Timeout:
+                            logger.warning(f"[数据字段获取]     ⚠ 请求超时，跳过数据集: {dataset}")
+                            continue
+                        except requests.exceptions.RequestException as e:
+                            logger.warning(f"[数据字段获取]     ⚠ 请求失败: {e}，跳过数据集: {dataset}")
+                            continue
 
                         if response.status_code == 200:
-                            data = response.json()
+                            try:
+                                data = response.json()
+                            except json.JSONDecodeError as e:
+                                logger.warning(f"[数据字段获取]     ⚠ JSON 解析失败: {e}")
+                                continue
+
                             fields = data.get('results', [])
-                            print(f"[数据字段获取]     ✓ 成功获取 {len(fields)} 个字段")
+                            logger.info(f"[数据字段获取]     ✓ 成功获取 {len(fields)} 个字段")
                             all_fields.extend(fields)
                         else:
-                            print(f"[数据字段获取]     ⚠ 获取字段失败: {response.text[:200]}")
+                            logger.info(f"[数据字段获取]     ⚠ 获取字段失败: {response.text[:200]}")
                 else:
-                    print(f"[数据字段获取]     ⚠ 获取字段数量失败: {count_response.text[:200]}")
+                    logger.info(f"[数据字段获取]     ⚠ 获取字段数量失败: {count_response.text[:200]}")
 
             # Remove duplicates if any
             unique_fields = {field['id']: field for field in all_fields}.values()
-            print(f"[数据字段获取] ✓ 完成! 共获取 {len(unique_fields)} 个唯一字段")
+            logger.info(f"[数据字段获取] ✓ 完成! 共获取 {len(unique_fields)} 个唯一字段")
+
             return list(unique_fields)
 
         except Exception as e:
@@ -641,10 +968,12 @@ class AlphaGenerator:
 
     def get_operators(self) -> List[Dict]:
         """Fetch available operators from WorldQuant Brain."""
-        print("Requesting operators...")
+        logger.info("=" * 50)
+        logger.info("开始获取操作符...")
+        logger.info("=" * 50)
         response = self.sess.get('https://api.worldquantbrain.com/operators', timeout=30)
-        print(f"Operators response status: {response.status_code}")
-        print(f"Operators response: {response.text[:500]}...")  # Print first 500 chars
+        logger.info(f"Operators response status: {response.status_code}")
+        logger.info(f"Operators response: {response.text[:500]}...")  # Print first 500 chars
         
         if response.status_code != 200:
             raise Exception(f"Failed to get operators: {response.text}")
@@ -684,7 +1013,8 @@ class AlphaGenerator:
 
     def generate_alpha_ideas_with_ollama(self, data_fields: List[Dict], operators: List[Dict]) -> List[str]:
         """Generate alpha ideas using LLM (Ollama or online model)."""
-        print("Organizing operators by category...")
+        logger.info(f"开始生成 Alpha 想法 - 数据字段: {len(data_fields)}, 操作符: {len(operators)}")
+
         operator_by_category = {}
         for op in operators:
             category = op['category']
@@ -710,7 +1040,7 @@ class AlphaGenerator:
                 sample_size = max(1, int(len(ops) * 0.5))  # At least 1 operator per category
                 sampled_operators[category] = random.sample(ops, sample_size)
 
-            print("Preparing prompt for LLM...")
+            logger.info("准备 LLM 提示词...")
             # Format operators with their types, definitions, and descriptions
             def format_operators(ops):
                 formatted = []
@@ -741,18 +1071,6 @@ class AlphaGenerator:
             if data_fields_ref:
                 fields_ref_context = f"\n\n### High-COverage Data Fields (Recommended):\n{data_fields_ref}\n"
 
-            # 加载成功的 alpha 模式（随机选择）
-            successful_patterns = load_successful_patterns(max_patterns=10, randomize=True)
-            success_context = ""
-            if successful_patterns:
-                success_context = "\n\n### Successful Alpha Patterns (High Fitness, Learn from These):\n"
-                for i, pattern in enumerate(successful_patterns[:5], 1):
-                    success_context += f"{i}. {pattern['expression'][:80]}\n"
-                    success_context += f"   Fitness: {pattern.get('fitness', 'N/A'):.3f}"
-                    if pattern.get('sharpe'):
-                        success_context += f", Sharpe: {pattern['sharpe']:.2f}"
-                    success_context += "\n"
-
             # 加载已提交的 alpha（从 WQ API）
             submitted_alphas = load_submitted_alphas(self.sess, max_alphas=10)
             submitted_context = ""
@@ -771,10 +1089,16 @@ class AlphaGenerator:
             # 获取随机示例格式
             example_format = _get_random_example_format()
 
-            prompt = f"""Generate 5 unique alpha factor expressions using the available operators and data fields. Return ONLY the expressions, one per line, with no comments or explanations.
+            # 获取采样的数据字段 ID（随机从高覆盖率字段中选择）
+            sampled_field_ids = get_sampled_field_ids(max_fields=100, randomize=True)
+            if not sampled_field_ids:
+                # fallback: 使用全部字段
+                sampled_field_ids = [field['id'] for field in data_fields]
 
-Available Data Fields:
-{[field['id'] for field in data_fields]}
+            prompt = f"""Generate 20 unique alpha factor expressions using the available operators and data fields. Return ONLY the expressions, one per line, with no comments or explanations.
+
+Available Data Fields (Sampled {len(sampled_field_ids)} high-coverage fields):
+{sampled_field_ids}
 
 Available Operators by Category:
 Time Series:
@@ -797,14 +1121,14 @@ Transformational:
 
 Group:
 {chr(10).join(format_operators(sampled_operators.get('Group', [])))}
-{error_context}{knowledge_context}{fields_ref_context}{success_context}{submitted_context}
+{error_context}{knowledge_context}{fields_ref_context}{submitted_context}
 Requirements:
 1. Let your intuition guide you.
 2. Use the operators and data fields to create a unique and potentially profitable alpha factor.
 3. Anything is possible 42.
 4. Avoid using event-type data fields (like nws12_*, fnd6_newqeventv*) with time series operators (ts_rank, ts_sum, etc.) as they don't support event inputs.
 
-Critical Success Patterns (MUST FOLLOW):
+Critical Success Patterns :
 1. ALWAYS wrap expression with rank() / ts_rank() / group_rank() as the outermost operator - this ensures weight distribution and passes CONCENTRATED_WEIGHT check.
 2. For fundamental data, use divide(field, cap) for market cap normalization - makes factor size-neutral.
 3. Use group_neutralize(expr, industry) for industry neutralization - improves SUB_UNIVERSE_SHARPE.
@@ -865,64 +1189,19 @@ Strategy Suggestions (pick one or combine):
 
             # 使用统一 LLM 客户端
             if self.llm_client:
-                print(f"Sending request to LLM ({self.llm_client.get_provider()}: {self.llm_client.get_model_name()})...")
+                logger.info(f"Sending request to LLM ({self.llm_client.get_provider()}: {self.llm_client.get_model_name()})...")
                 try:
                     if self.llm_client.is_online():
-                        content = self.llm_client.generate(prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=1000)
+                        content = self.llm_client.generate(prompt, system_prompt=system_prompt, temperature=0.3, max_tokens=40960)
                     else:
-                        content = self.llm_client.generate(prompt, temperature=0.3, max_tokens=1000)
-                    print(f"LLM response received ({len(content)} chars)")
+                        content = self.llm_client.generate(prompt, temperature=0.3, max_tokens=40960)
+                    logger.info(f"LLM response received ({len(content)} chars)")
                 except Exception as e:
-                    logging.error(f"LLM request failed: {e}")
+                    logger.error(f"LLM request failed: {e}")
                     self._handle_llm_error(str(e))
                     return []
-            else:
-                # 回退到原有 Ollama 直接调用
-                print("Sending request to Ollama API (fallback)...")
-                model_name = getattr(self, 'model_name', self.model_fleet[self.current_model_index])
-                ollama_data = {
-                    'model': model_name,
-                    'prompt': prompt,
-                    'stream': False,
-                    'temperature': 0.3,
-                    'top_p': 0.9,
-                    'num_predict': 1000
-                }
 
-                try:
-                    response = requests.post(
-                        f'{self.ollama_url}/api/generate',
-                        json=ollama_data,
-                        timeout=360
-                    )
-
-                    print(f"Ollama API response status: {response.status_code}")
-
-                    if response.status_code == 500:
-                        logging.error(f"Ollama API returned 500 error: {response.text}")
-                        self._handle_llm_error("500_error")
-                        return []
-                    elif response.status_code != 200:
-                        raise Exception(f"Ollama API request failed: {response.text}")
-
-                    response_data = response.json()
-                    if 'response' not in response_data:
-                        raise Exception(f"Unexpected Ollama API response format: {response_data}")
-                    content = response_data['response']
-
-                except requests.exceptions.Timeout:
-                    logging.error("Ollama API request timed out (360s)")
-                    self._handle_llm_error("timeout")
-                    return []
-                except requests.exceptions.ConnectionError as e:
-                    if "Read timed out" in str(e):
-                        logging.error("Ollama API read timeout")
-                        self._handle_llm_error("read_timeout")
-                        return []
-                    else:
-                        raise e
-
-            print("Processing LLM response...")
+            logger.info("Processing LLM response...")
 
             # Extract pure alpha expressions by:
             # 1. Remove markdown backticks
@@ -940,31 +1219,25 @@ Strategy Suggestions (pick one or combine):
                 if line and not line.startswith('Comment:'):
                     alpha_ideas.append(line)
 
-            print(f"Generated {len(alpha_ideas)} alpha ideas")
-            for i, alpha in enumerate(alpha_ideas, 1):
-                print(f"Alpha {i}: {alpha}")
-
             # Clean and validate ideas
             cleaned_ideas = self.clean_alpha_ideas(alpha_ideas)
-            logging.info(f"Found {len(cleaned_ideas)} valid alpha expressions")
-
             return cleaned_ideas
 
         except Exception as e:
             if "token limit" in str(e).lower():
                 self._hit_token_limit = True
-            logging.error(f"Error generating alpha ideas: {str(e)}")
+            logger.error(f"Error generating alpha ideas: {str(e)}")
             return []
 
     def _handle_llm_error(self, error_type: str):
         """Handle LLM errors by downgrading model if needed (only for Ollama)."""
         # 线上模型不需要降级
         if self.llm_client and self.llm_client.is_online():
-            logging.warning(f"Online LLM error ({error_type}), will retry with same model")
+            logger.warning(f"Online LLM error ({error_type}), will retry with same model")
             return
 
         self.error_count += 1
-        logging.warning(f"Ollama error ({error_type}) - Count: {self.error_count}/{self.max_errors_before_downgrade}")
+        logger.warning(f"Ollama error ({error_type}) - Count: {self.error_count}/{self.max_errors_before_downgrade}")
 
         if self.error_count >= self.max_errors_before_downgrade:
             self._downgrade_model()
@@ -973,18 +1246,18 @@ Strategy Suggestions (pick one or combine):
     def _downgrade_model(self):
         """Downgrade to the next smaller model in the fleet."""
         if self.current_model_index >= len(self.model_fleet) - 1:
-            logging.error("Already using the smallest model in the fleet!")
+            logger.error("Already using the smallest model in the fleet!")
             # Reset to initial model if we've exhausted all options
             self.current_model_index = 0
             self.model_name = self.initial_model
-            logging.info(f"Reset to initial model: {self.initial_model}")
+            logger.info(f"Reset to initial model: {self.initial_model}")
             return
         
         old_model = self.model_fleet[self.current_model_index]
         self.current_model_index += 1
         new_model = self.model_fleet[self.current_model_index]
         
-        logging.warning(f"Downgrading model: {old_model} -> {new_model}")
+        logger.warning(f"Downgrading model: {old_model} -> {new_model}")
         self.model_name = new_model
         
         # Update the model in the orchestrator if it exists
@@ -993,11 +1266,11 @@ Strategy Suggestions (pick one or combine):
             if hasattr(self, 'orchestrator') and hasattr(self.orchestrator, 'model_fleet_manager'):
                 self.orchestrator.model_fleet_manager.current_model_index = self.current_model_index
                 self.orchestrator.model_fleet_manager.save_state()
-                logging.info(f"Updated orchestrator model fleet to use: {new_model}")
+                logger.info(f"Updated orchestrator model fleet to use: {new_model}")
         except Exception as e:
-            logging.warning(f"Could not update orchestrator model fleet: {e}")
+            logger.warning(f"Could not update orchestrator model fleet: {e}")
         
-        logging.info(f"Successfully downgraded to {new_model}")
+        logger.info(f"Successfully downgraded to {new_model}")
 
     def test_alpha_batch(self, alphas: List[str] = None) -> int:
         """
@@ -1138,7 +1411,7 @@ Strategy Suggestions (pick one or combine):
                 # 检查次数限制
                 info["attempts"] = info.get("attempts", 0) + 1
                 if info["attempts"] > max_check_attempts:
-                    logging.warning(f"Simulation {sim_id} exceeded max check attempts ({max_check_attempts}), marking as failed")
+                    logger.warning(f"Simulation {sim_id} exceeded max check attempts ({max_check_attempts}), marking as failed")
                     completed.append(sim_id)
                     continue
 
@@ -1146,21 +1419,21 @@ Strategy Suggestions (pick one or combine):
                 if "start_time" not in info:
                     info["start_time"] = time.time()
                 elif time.time() - info["start_time"] > 1800:  # 30 minutes
-                    logging.warning(f"Simulation {sim_id} has been pending for too long, marking as failed")
+                    logger.warning(f"Simulation {sim_id} has been pending for too long, marking as failed")
                     completed.append(sim_id)
                     continue
                 try:
                     sim_progress_resp = self.sess.get(info["progress_url"], timeout=30)
-                    logging.info(f"Checking simulation {sim_id} (attempt {info['attempts']}/{max_check_attempts}) for alpha: {info['alpha'][:50]}...")
+                    logger.info(f"Checking simulation {sim_id} (attempt {info['attempts']}/{max_check_attempts}) for alpha: {info['alpha'][:50]}...")
 
                     # Handle rate limits
                     if sim_progress_resp.status_code == 429:
-                        logging.info("Rate limit hit, will retry later")
+                        logger.info("Rate limit hit, will retry later")
                         continue
 
                     # Handle simulation limits
                     if "SIMULATION_LIMIT_EXCEEDED" in sim_progress_resp.text:
-                        logging.info(f"Simulation limit exceeded for alpha: {info['alpha']}")
+                        logger.info(f"Simulation limit exceeded for alpha: {info['alpha']}")
                         retry_queue.append((info['alpha'], sim_id))
                         continue
 
@@ -1168,7 +1441,7 @@ Strategy Suggestions (pick one or combine):
                     try:
                         sim_result = sim_progress_resp.json()
                     except Exception as json_err:
-                        logging.warning(f"Failed to parse simulation response: {json_err}")
+                        logger.warning(f"Failed to parse simulation response: {json_err}")
                         continue
 
                     # 检查进度（如果只有 progress 字段，说明还在运行）
@@ -1177,27 +1450,27 @@ Strategy Suggestions (pick one or combine):
 
                     # 如果有 progress 但没有 status，说明模拟还在运行中
                     if progress is not None and status is None:
-                        logging.info(f"Simulation {sim_id} progress: {progress*100:.1f}% - URL: {info['progress_url']}")
+                        logger.info(f"Simulation {sim_id} progress: {progress*100:.1f}% - URL: {info['progress_url']}")
                         # 等待 Retry-After 时间后继续检查
                         retry_after = sim_progress_resp.headers.get("Retry-After")
                         if retry_after:
                             try:
                                 wait_time = int(float(retry_after))
-                                logging.info(f"Waiting {wait_time}s for simulation to complete...")
+                                logger.info(f"Waiting {wait_time}s for simulation to complete...")
                                 time.sleep(wait_time)
                             except (ValueError, TypeError):
                                 time.sleep(5)
                         continue
 
-                    logging.info(f"Simulation {sim_id} status: {status} - URL: {info['progress_url']}")
+                    logger.info(f"Simulation {sim_id} status: {status} - URL: {info['progress_url']}")
 
                     # Log additional details for debugging
                     if status == "PENDING":
-                        logging.debug(f"Simulation {sim_id} is pending...")
+                        logger.debug(f"Simulation {sim_id} is pending...")
                     elif status == "RUNNING":
-                        logging.debug(f"Simulation {sim_id} is running...")
+                        logger.debug(f"Simulation {sim_id} is running...")
                     elif status not in ["COMPLETE", "ERROR"]:
-                        logging.warning(f"Simulation {sim_id} has unknown status: {status} - URL: {info['progress_url']}")
+                        logger.warning(f"Simulation {sim_id} has unknown status: {status} - URL: {info['progress_url']}")
 
                     if status == "COMPLETE":
                         alpha_id = sim_result.get("alpha")
@@ -1206,7 +1479,7 @@ Strategy Suggestions (pick one or combine):
                             if alpha_resp.status_code == 200:
                                 alpha_data = alpha_resp.json()
                                 fitness = alpha_data.get("is", {}).get("fitness")
-                                logging.info(f"Alpha {alpha_id} completed with fitness: {fitness}")
+                                logger.info(f"Alpha {alpha_id} completed with fitness: {fitness}")
 
                                 self.results.append({
                                     "alpha": info["alpha"],
@@ -1216,26 +1489,26 @@ Strategy Suggestions (pick one or combine):
 
                                 # Check if fitness is not None and greater than threshold
                                 if fitness is not None and fitness > 0.5:
-                                    logging.info(f"Found promising alpha! Fitness: {fitness}")
+                                    logger.info(f"Found promising alpha! Fitness: {fitness}")
                                     self.log_hopeful_alpha(info["alpha"], alpha_data)
                                     successful += 1
                                 elif fitness is None:
-                                    logging.warning(f"Alpha {alpha_id} has no fitness data, skipping hopeful alpha logging")
+                                    logger.warning(f"Alpha {alpha_id} has no fitness data, skipping hopeful alpha logging")
                     elif status == "ERROR":
                         # 记录详细错误信息
                         error_msg = sim_result.get("message", "Unknown error")
                         error_location = sim_result.get("location", {})
-                        logging.error(f"Simulation failed for alpha: {info['alpha']}")
-                        logging.error(f"  Error: {error_msg}")
+                        logger.error(f"Simulation failed for alpha: {info['alpha']}")
+                        logger.error(f"  Error: {error_msg}")
                         if error_location:
-                            logging.error(f"  Location: line {error_location.get('line')}, pos {error_location.get('start')}-{error_location.get('end')}")
+                            logger.error(f"  Location: line {error_location.get('line')}, pos {error_location.get('start')}-{error_location.get('end')}")
 
                         # 保存错误信息到文件，供后续分析和反馈给大模型
                         self._log_simulation_error(info["alpha"], sim_result)
                     completed.append(sim_id)
                     
                 except Exception as e:
-                    logging.error(f"Error checking result for {sim_id}: {str(e)}")
+                    logger.error(f"Error checking result for {sim_id}: {str(e)}")
         
         # Remove completed simulations
         for sim_id in completed:
@@ -1385,6 +1658,51 @@ Strategy Suggestions (pick one or combine):
 
         return successful
 
+    def _is_already_simulated(self, expression: str) -> bool:
+        """检查公式是否已经模拟过"""
+        simulated_file = 'simulated_expressions.json'
+        if not os.path.exists(simulated_file):
+            return False
+
+        try:
+            with open(simulated_file, 'r') as f:
+                simulated = json.load(f)
+            # 检查表达式是否在已模拟列表中
+            for entry in simulated:
+                if entry.get('expression') == expression:
+                    return True
+            return False
+        except (json.JSONDecodeError, FileNotFoundError):
+            return False
+
+    def _record_simulation(self, expression: str, sim_id: str, status: str = "submitted") -> None:
+        """记录已提交的模拟"""
+        simulated_file = 'simulated_expressions.json'
+
+        existing = []
+        if os.path.exists(simulated_file):
+            try:
+                with open(simulated_file, 'r') as f:
+                    existing = json.load(f)
+            except json.JSONDecodeError:
+                pass
+
+        # 添加记录
+        entry = {
+            "expression": expression,
+            "simulation_id": sim_id,
+            "timestamp": int(time.time()),
+            "status": status
+        }
+        existing.append(entry)
+
+        # 只保留最近 1000 条记录
+        if len(existing) > 1000:
+            existing = existing[-1000:]
+
+        with open(simulated_file, 'w') as f:
+            json.dump(existing, f, indent=2)
+
     def test_alpha(self, alpha: str) -> Dict:
         result = self._test_alpha_impl(alpha)
         if result.get("status") == "error" and "SIMULATION_LIMIT_EXCEEDED" in result.get("message", ""):
@@ -1394,6 +1712,13 @@ Strategy Suggestions (pick one or combine):
 
     def _test_alpha_impl(self, alpha_expression: str) -> Dict:
         """Implementation of alpha testing with proper URL handling and retry logic."""
+        logger.info(f"开始提交模拟: {alpha_expression}")
+
+        # 检查是否已经模拟过这个公式
+        if self._is_already_simulated(alpha_expression):
+            logger.info(f"Alpha 已模拟过，跳过: {alpha_expression[:80]}...")
+            return {"status": "skipped", "message": "Alpha already simulated"}
+
         def submit_simulation():
             simulation_data = {
                 'type': 'REGULAR',
@@ -1413,6 +1738,7 @@ Strategy Suggestions (pick one or combine):
                 },
                 'regular': alpha_expression
             }
+            logger.info(f"POST https://api.worldquantbrain.com/simulations - 公式: {alpha_expression[:60]}...")
             return self.sess.post('https://api.worldquantbrain.com/simulations', json=simulation_data, timeout=60)
 
         max_retries = 3
@@ -1432,15 +1758,22 @@ Strategy Suggestions (pick one or combine):
                     sim_resp = submit_simulation()  # Retry with new auth
 
                 if sim_resp.status_code != 201:
+                    logger.error(f"模拟提交失败 (HTTP {sim_resp.status_code}): {sim_resp.text[:200]}")
                     return {"status": "error", "message": sim_resp.text}
 
                 sim_progress_url = sim_resp.headers.get('location')
                 if not sim_progress_url:
+                    logger.error("模拟提交失败: 未收到 progress URL")
                     return {"status": "error", "message": "No progress URL received"}
 
                 # 从 URL 中提取真实的模拟 ID
                 # URL 格式: https://api.worldquantbrain.com/simulations/{sim_id}
                 sim_id = sim_progress_url.rstrip('/').split('/')[-1]
+
+                # 记录已提交的模拟
+                self._record_simulation(alpha_expression, sim_id, "submitted")
+
+                logger.info(f"模拟提交成功 - ID: {sim_id}, 公式: {alpha_expression[:60]}...")
 
                 return {
                     "status": "success",
@@ -1471,7 +1804,7 @@ Strategy Suggestions (pick one or combine):
         return {"status": "error", "message": "Max retries exceeded"}
 
     def log_hopeful_alpha(self, expression: str, alpha_data: Dict) -> None:
-        """Log promising alphas to a JSON file."""
+        """Log promising alphas to a JSON file with deduplication."""
         log_file = 'hopeful_alphas.json'
 
         # Load existing data
@@ -1481,19 +1814,27 @@ Strategy Suggestions (pick one or combine):
                 with open(log_file, 'r') as f:
                     existing_data = json.load(f)
             except json.JSONDecodeError:
-                print(f"Warning: Could not parse {log_file}, starting fresh")
+                logger.info(f"Warning: Could not parse {log_file}, starting fresh")
+
+        # 检查是否已存在相同表达式
+        for existing in existing_data:
+            if existing.get('expression') == expression:
+                logger.info(f"Alpha already exists in {log_file}, skipping duplicate: {expression[:50]}...")
+                return
 
         # Add new alpha with timestamp
         entry = {
             "expression": expression,  # Store just the expression string
             "timestamp": int(time.time()),
             "alpha_id": alpha_data.get("id", "unknown"),
+            "simulation_id": alpha_data.get("id", "unknown"),  # 记录模拟 ID
             "fitness": alpha_data.get("is", {}).get("fitness"),
             "sharpe": alpha_data.get("is", {}).get("sharpe"),
             "turnover": alpha_data.get("is", {}).get("turnover"),
             "returns": alpha_data.get("is", {}).get("returns"),
             "grade": alpha_data.get("grade", "UNKNOWN"),
-            "checks": alpha_data.get("is", {}).get("checks", [])
+            "checks": alpha_data.get("is", {}).get("checks", []),
+            "status": "pending_mining"  # 添加状态字段
         }
 
         existing_data.append(entry)
@@ -1502,7 +1843,7 @@ Strategy Suggestions (pick one or combine):
         with open(log_file, 'w') as f:
             json.dump(existing_data, f, indent=2)
 
-        print(f"Logged promising alpha to {log_file}")
+        logger.info(f"Logged promising alpha to {log_file}")
 
     def _log_simulation_error(self, expression: str, error_result: Dict) -> None:
         """记录模拟错误信息，供后续分析和反馈给大模型"""
@@ -1915,58 +2256,84 @@ def main():
         # 设置清理处理器
         setup_cleanup_handler(generator)
 
-        # Get data fields and operators once
-        print("Fetching data fields and operators...")
-        data_fields = generator.get_data_fields()
-        operators = generator.get_operators()
-        
+        # Get data fields and operators - 优先从本地知识库加载
+        logger.info("=" * 50)
+        logger.info("开始加载数据字段和操作符...")
+        logger.info("=" * 50)
+
+        # 尝试从本地加载数据字段
+        data_fields = generator.get_data_fields_from_local()
+        if data_fields is None:
+            logger.info("[数据字段] 本地加载失败，从 API 获取...")
+            data_fields = generator.get_data_fields()
+        logger.info(f"数据字段加载完成，共 {len(data_fields)} 个字段")
+
+        # 尝试从本地加载操作符
+        operators = generator.get_operators_from_local()
+        if operators is None:
+            logger.info("[操作符] 本地加载失败，从 API 获取...")
+            operators = generator.get_operators()
+        logger.info(f"操作符加载完成，共 {len(operators)} 个操作符")
+
         batch_number = 1
         total_successful = 0
 
-        print(f"Starting continuous alpha mining with batch size {args.batch_size}")
-        print(f"Results will be saved to {args.output_dir}")
-        print(f"Using Ollama at {args.ollama_url}")
+        logger.info(f"Starting continuous alpha mining with batch size {args.batch_size}")
+        logger.info(f"Results will be saved to {args.output_dir}")
+        logger.info(f"Using Ollama at {args.ollama_url}")
 
         # 显示优化状态
         if generator.optimization_enabled:
-            print(f"优化功能已启用 - 每轮优化 {generator.optimization_config.get('optimize_per_cycle', 5)} 个 Alpha")
+            logger.info(f"优化功能已启用 - 每轮优化 {generator.optimization_config.get('optimize_per_cycle', 5)} 个 Alpha")
         else:
-            print("优化功能未启用")
+            logger.info("优化功能未启用")
+
+        logger.info("=" * 50)
+        logger.info("进入主循环，开始生成 Alpha...")
+        logger.info("=" * 50)
+
+        # 启动消费者线程（独立消费队列中的 Alpha）
+        generator.start_consumer_thread(check_interval=5, batch_size=10)
+        logger.info("✅ 消费者线程已启动，将独立处理队列中的 Alpha")
 
         while True:
             try:
-                logger.info(f"\nProcessing batch #{batch_number}")
+                logger.info(f"\n{'='*20} Processing batch #{batch_number} {'='*20}")
                 logger.info("-" * 50)
 
-                # 1. 生成新 Alpha
+                # 1. 生成新 Alpha（生产者）
                 logger.info("步骤 1: 生成新 Alpha...")
+                logger.info(f"调用 generate_alpha_ideas_with_ollama, 全部字段数: {len(data_fields)}, 操作符数: {len(operators)}")
                 alpha_ideas = generator.generate_alpha_ideas_with_ollama(data_fields, operators)
+                logger.info(f"生成完成，获得 {len(alpha_ideas)} 个 Alpha 想法")
 
-                # 添加到队列（标记为生成）
+                # 添加到队列（消费者线程会自动处理）
                 if generator.alpha_queue:
                     for alpha in alpha_ideas:
                         generator.alpha_queue.add_generated(alpha)
+                    queue_size = len(generator.alpha_queue)
+                    logger.info(f"📦 Alpha 已加入队列，当前队列大小: {queue_size}")
+                else:
+                    logger.warning("⚠️ alpha_queue 未初始化，Alpha 未加入队列")
 
-                # 2. 优化失败的 Alpha
+                # 2. 优化失败的 Alpha（生产者）
                 if generator.optimization_enabled:
                     logger.info("步骤 2: 优化失败的 Alpha...")
                     try:
                         optimized_results = generator.optimize_failed_alphas()
                         if optimized_results:
-                            logger.info(f"优化完成: {len(optimized_results)} 个")
+                            logger.info(f"优化完成: {len(optimized_results)} 个，已加入队列")
                     except Exception as e:
                         logger.error(f"优化过程出错: {e}")
                 else:
                     logger.info("步骤 2: 跳过优化（未启用）")
 
-                # 3. 统一提交测试
-                logger.info("步骤 3: 提交测试...")
-                batch_successful = generator.test_alpha_batch()
-                total_successful += batch_successful
-
-                # 4. 汇报统计
+                # 3. 汇报统计（每 5 批次）
                 if generator.alpha_queue and batch_number % 5 == 0:
                     generator.report_optimization_stats()
+                    queue_size = len(generator.alpha_queue)
+                    pending_count = len(generator.pending_results)
+                    logger.info(f"📊 状态: 队列 {queue_size} 待测试, {pending_count} 待结果")
 
                 # Perform VRAM cleanup every few batches
                 generator.operation_count += 1
@@ -1975,19 +2342,17 @@ def main():
 
                 # Save batch results
                 results = generator.get_results()
-                timestamp = int(time.time())
-                output_file = os.path.join(args.output_dir, f'batch_{batch_number}_{timestamp}.json')
-                with open(output_file, 'w') as f:
-                    json.dump(results, f, indent=2)
-
-                logger.info(f"Batch {batch_number} results saved to {output_file}")
-                logger.info(f"Batch successful: {batch_successful}")
-                logger.info(f"Total successful alphas: {total_successful}")
+                if results:
+                    timestamp = int(time.time())
+                    output_file = os.path.join(args.output_dir, f'batch_{batch_number}_{timestamp}.json')
+                    with open(output_file, 'w') as f:
+                        json.dump(results, f, indent=2)
+                    logger.info(f"Batch {batch_number} results saved to {output_file}")
 
                 batch_number += 1
 
                 # Sleep between batches
-                print(f"Sleeping for {args.sleep_time} seconds...")
+                logger.info(f"Sleeping for {args.sleep_time} seconds...")
                 sleep(args.sleep_time)
 
             except Exception as e:
@@ -1999,11 +2364,14 @@ def main():
     except KeyboardInterrupt:
         logger.info("\nStopping alpha mining...")
         logger.info(f"Total batches processed: {batch_number - 1}")
-        logger.info(f"Total successful alphas: {total_successful}")
+        # 停止消费者线程
+        generator.stop_consumer_thread()
+        logger.info("消费者线程已停止")
         return 0
 
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
+        generator.stop_consumer_thread()
         return 1
 
 
@@ -2013,6 +2381,8 @@ def setup_cleanup_handler(generator):
         logger.info("Alpha Generator 正在关闭...")
         if generator:
             try:
+                # 停止消费者线程
+                generator.stop_consumer_thread()
                 # 关闭线程池
                 generator.executor.shutdown(wait=False)
                 logger.info("线程池已关闭")
@@ -2045,7 +2415,7 @@ def setup_cleanup_handler(generator):
             def console_ctrl_handler(ctrl_type):
                 if ctrl_type in (2, 5, 6):
                     # 使用 print 而不是 logger，因为 logger 可能已经不可用
-                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在关闭...")
+                    logger.info(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 收到 Windows 控制台关闭事件 (类型: {ctrl_type})，正在关闭...")
                     # 强制刷新输出
                     sys.stdout.flush()
                     cleanup()

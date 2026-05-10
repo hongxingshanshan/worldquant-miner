@@ -172,6 +172,10 @@ class AlphaQueue:
     def __len__(self) -> int:
         return len(self.queue)
 
+    def __bool__(self) -> bool:
+        """队列对象始终为 True（即使为空）"""
+        return True
+
     def __repr__(self) -> str:
         return (
             f"AlphaQueue(queue={len(self.queue)}, "
