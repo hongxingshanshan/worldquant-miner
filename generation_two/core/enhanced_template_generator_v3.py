@@ -32,17 +32,18 @@ class EnhancedTemplateGeneratorV3:
     """
     
     def __init__(
-        self, 
+        self,
         credentials_path: str = None,
         credentials: List[str] = None,  # New: allow passing credentials directly
         deepseek_api_key: str = None,
         db_path: str = "generation_two_backtests.db",
         ollama_url: str = "http://localhost:11434",
-        ollama_model: str = "llama3:8b"  # Use llama3:8b for better JSON generation
+        ollama_model: str = "llama3:8b",  # Use llama3:8b for better JSON generation
+        config_manager = None  # New: ConfigManager for dynamic LLM configuration
     ):
         """
         Initialize Generation Two system
-        
+
         Args:
             credentials_path: Path to WorldQuant Brain credentials file
             credentials: Direct credentials as [username, password] (takes precedence over credentials_path)
@@ -50,7 +51,11 @@ class EnhancedTemplateGeneratorV3:
             db_path: Path to backtest storage database
             ollama_url: Ollama server URL
             ollama_model: Ollama model name
+            config_manager: ConfigManager instance for dynamic LLM configuration
         """
+        # Store config_manager
+        self.config_manager = config_manager
+
         # Initialize modular components with Ollama support
         self.template_generator = TemplateGenerator(
             credentials_path=credentials_path,
@@ -58,7 +63,8 @@ class EnhancedTemplateGeneratorV3:
             deepseek_api_key=deepseek_api_key,
             ollama_url=ollama_url,
             ollama_model=ollama_model,
-            db_path=db_path  # Pass database path to template generator
+            db_path=db_path,  # Pass database path to template generator
+            config_manager=config_manager  # Pass config_manager for LLM configuration
         )
         
         # Theme manager

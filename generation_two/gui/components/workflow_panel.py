@@ -20,29 +20,31 @@ logger = logging.getLogger(__name__)
 
 class WorkflowPanel:
     """Guided workflow panel for seamless UX"""
-    
-    def __init__(self, parent, generator=None):
+
+    def __init__(self, parent, generator=None, config_manager=None):
         """
         Initialize workflow panel
-        
+
         Args:
             parent: Parent widget
             generator: EnhancedTemplateGeneratorV3 instance
+            config_manager: ConfigManager instance for dynamic configuration
         """
         self.parent = parent
         self.generator = generator
-        
+        self.config_manager = config_manager
+
         self.frame = tk.Frame(parent, **STYLES['frame'])
         self.frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
+
         self.current_step = 0
         self.steps_completed = set()
         self.operators_loaded = False  # Track if operators are loaded
-        
+
         # Configuration file for saving/loading last settings
         self.config_file = Path.home() / ".generation_two" / "workflow_config.json"
         self.config_file.parent.mkdir(exist_ok=True)
-        
+
         self._create_widgets()
         self._check_initial_state()
         # Load config asynchronously to avoid blocking GUI startup

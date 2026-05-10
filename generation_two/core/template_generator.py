@@ -25,39 +25,47 @@ class TemplateGenerator:
     """
     
     def __init__(
-        self, 
-        credentials_path: str = None, 
+        self,
+        credentials_path: str = None,
         credentials: List[str] = None,  # New: allow passing credentials directly
         deepseek_api_key: str = None,
         ollama_url: str = "http://localhost:11434",
         ollama_model: str = "llama3:8b",  # Use llama3:8b for better JSON generation
-        db_path: str = "generation_two_backtests.db"
+        db_path: str = "generation_two_backtests.db",
+        config_manager = None  # New: ConfigManager for dynamic LLM configuration
     ):
         """
         Initialize template generator
-        
+
         Args:
             credentials_path: Path to WorldQuant Brain credentials file
             credentials: Direct credentials as [username, password] (takes precedence over credentials_path)
             deepseek_api_key: DeepSeek API key for LLM generation
-            ollama_url: Ollama server URL
-            ollama_model: Ollama model name
+            ollama_url: Ollama server URL (optional, loaded from config if config_manager provided)
+            ollama_model: Ollama model name (optional, loaded from config if config_manager provided)
             db_path: Path to database for storing compiler knowledge
+            config_manager: ConfigManager instance for dynamic LLM configuration
         """
         self.credentials_path = credentials_path
         self._stored_credentials = credentials  # Store credentials in memory for re-authentication
         self.deepseek_api_key = deepseek_api_key
         self.db_path = db_path
+        self.config_manager = config_manager
         # Create session with cookie persistence enabled (default, but explicit)
         self.sess = requests.Session()
         # Ensure cookies are maintained across requests
         self.sess.cookies.clear()  # Start fresh
-        
+
         # Initialize Ollama manager (smart with fallback)
-        self.ollama_manager = OllamaManager(
-            base_url=ollama_url,
-            model=ollama_model
-        )
+        # If config_manager is provided, LLM settings will be loaded from config
+        # Don't pass base_url/model if config_manager exists - let config take priority
+        if config_manager:
+            self.ollama_manager = OllamaManager(config_manager=config_manager)
+        else:
+            self.ollama_manager = OllamaManager(
+                base_url=ollama_url,
+                model=ollama_model
+            )
         
         # Initialize theme manager
         self.theme_manager = RegionThemeManager()

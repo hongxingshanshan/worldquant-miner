@@ -1,0 +1,68 @@
+{
+  "llm": {
+    "name": "llm",
+    "data": {
+      "provider": "online",
+      "online": {
+        "api_key": "sk-LVzCwEJ9SNOaL1nunwwy1LFMXw85EASHfWDAlvkdb7Ro0DLz",
+        "base_url": "https://cmkey.cn",
+        "model": "glm-5.1",
+        "max_tokens": 40960
+      },
+      "ollama": {
+        "base_url": "http://localhost:11434",
+        "model": "llama3:8b"
+      },
+      "timeout": 360,
+      "max_retries": 3
+    },
+    "description": "LLM provider configuration (supports Ollama local and online models)",
+    "editable": true
+  },
+  "template_generation": {
+    "name": "template_generation",
+    "data": {
+      "use_ollama": true,
+      "ollama_priority": true,
+      "temperature": 0.7,
+      "max_tokens": 500,
+      "fallback_enabled": true,
+      "allowed_operator_scopes": ["REGULAR"],
+      "operator_scope_filter_enabled": true,
+      "operator_blacklist": [
+        "ts_min", "ts_max", "ts_target_tvr_delta_limit", "group_cartesian_product",
+        "to_nan", "vector_neut", "vec_min", "vec_max", "vec_sum", "vec_avg",
+        "generate_stats", "self_corr", "reduce_stddev", "reduce_skewness",
+        "reduce_range", "reduce_powersum", "reduce_percentage", "reduce_norm",
+        "reduce_min", "reduce_max", "reduce_kurtosis", "reduce_ir", "reduce_count",
+        "reduce_choose", "reduce_avg", "reduce_sum", "combo_a", "universe_size", "in"
+      ]
+    },
+    "description": "Template generation configuration",
+    "editable": true
+  },
+  "retry": {
+    "name": "retry",
+    "data": {
+      "max_retries": 3,
+      "strategy": "exponential",
+      "base_delay": 1.0,
+      "max_delay": 60.0,
+      "multiplier": 2.0,
+      "retryable_errors": [401, 405, 500, 502, 503, 504]
+    },
+    "description": "Retry logic configuration",
+    "editable": true
+  },
+  "simulation": {
+    "name": "simulation",
+    "data": {
+      "max_wait_time": 300,
+      "poll_interval": 10,
+      "concurrent_limit": 8,
+      "default_test_period": "P1Y0M0D"
+    },
+    "description": "Simulation testing configuration",
+    "editable": true
+  }
+}

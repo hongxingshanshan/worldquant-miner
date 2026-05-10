@@ -54,54 +54,57 @@ print("[ollama_manager] All imports completed", flush=True)
 
 class OllamaManager:
     """
-    Smart Ollama manager with connection pooling, fallback, and rate limiting
-    
+    Smart LLM manager with support for both Ollama local and online models
+
     Features:
+    - Support for Ollama local models and online LLM APIs (Anthropic-compatible)
     - Connection health monitoring
     - Automatic fallback to alternative methods
     - Rate limiting to prevent overload
     - Connection pooling
     - Smart retry logic
     """
-    
+
     def __init__(
         self,
-        base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5-coder:32b",
-        timeout: int = 120,
+        base_url: str = None,  # Optional, loaded from config
+        model: str = None,      # Optional, loaded from config
+        timeout: int = None,    # Optional, loaded from config
         max_retries: int = 3,
-        rate_limit: float = 2.0,  # seconds between requests
-        config_manager = None  # Optional config manager for dynamic settings
+        rate_limit: float = 2.0,
+        config_manager = None,
+        config_path: str = None  # New: config file path
     ):
         """
-        Initialize Ollama manager
+        Initialize LLM manager
 
         Args:
-            base_url: Ollama server URL
-            model: Model name to use
-            timeout: Request timeout in seconds
+            base_url: Ollama server URL (optional, loaded from config)
+            model: Model name to use (optional, loaded from config)
+            timeout: Request timeout in seconds (optional, loaded from config)
             max_retries: Maximum retry attempts
             rate_limit: Minimum seconds between requests
             config_manager: Optional ConfigManager for dynamic configuration
+            config_path: Path to config file for loading LLM settings
         """
-        self.base_url = base_url.rstrip('/')
-        self.model = model
-        self.timeout = timeout
+        # Load LLM configuration
+        self._load_llm_config(config_manager, config_path, base_url, model, timeout)
+
         self.max_retries = max_retries
         self.rate_limit = rate_limit
-        self.config_manager = config_manager  # Store config manager reference
-        
+        self.config_manager = config_manager
+
         # Connection state
         self.is_available = False
         self.last_check = None
         self.last_request_time = 0.0
-        self.health_check_interval = 300  # Check health every 5 minutes
+        self.health_check_interval = 300
         self.consecutive_failures = 0
         self.max_consecutive_failures = 5
-        
+
         # Thread safety
         self.lock = threading.Lock()
-        
+
         # Statistics
         self.stats = {
             'total_requests': 0,
@@ -109,39 +112,189 @@ class OllamaManager:
             'failed_requests': 0,
             'fallback_used': 0
         }
-        
-        # V2 style: Use ollama library directly (no session needed if available)
-        if OLLAMA_AVAILABLE:
-            logger.debug("Using ollama library (V2 style - no session needed)")
-            self.session = None  # Not needed when using ollama library
+
+        # Initialize provider-specific client
+        if self.provider == 'online':
+            self._init_online_client()
         else:
-            # Fallback: Create session with connection pooling for requests
-            try:
-                self.session = requests.Session()
-                retry_strategy = Retry(
-                    total=1,  # Only retry once (we handle retries ourselves)
-                    backoff_factor=0.1,
-                    status_forcelist=[429, 500, 502, 503, 504],
-                )
-                adapter = HTTPAdapter(
-                    max_retries=retry_strategy,
-                    pool_connections=10,  # Allow up to 10 concurrent connections
-                    pool_maxsize=10,  # Max connections per pool
-                    pool_block=False  # Don't block if pool is full, raise exception instead
-                )
-                self.session.mount("http://", adapter)
-                self.session.mount("https://", adapter)
-                logger.debug("Session with connection pooling initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize session with connection pooling: {e}", exc_info=True)
-                # Fallback to regular Session without pooling
-                self.session = requests.Session()
-                logger.warning("Using basic Session (no connection pooling)")
+            self._init_ollama_client()
         
         # Check initial availability (defer to avoid blocking import)
         # Don't check during __init__ - let it happen lazily on first use
         # self._check_availability()  # Commented out to prevent blocking during import
     
+    def _load_env_file(self, config_path: str = None):
+        """Load .env file from multiple possible locations"""
+        try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+
+            env_paths = []
+            if config_path:
+                env_paths.append(Path(config_path).parent / ".env")
+            env_paths.append(Path(__file__).parent.parent / ".env")  # generation_two/.env
+            env_paths.append(Path.cwd() / ".env")
+
+            for env_path in env_paths:
+                if env_path.exists():
+                    load_dotenv(env_path)
+                    logger.debug(f"Loaded .env from {env_path}")
+                    return
+        except ImportError:
+            logger.debug("python-dotenv not installed, skipping .env loading")
+        except Exception as e:
+            logger.debug(f"Error loading .env: {e}")
+
+    def _load_llm_config(self, config_manager, config_path, base_url, model, timeout):
+        """Load LLM configuration from multiple sources"""
+        import os
+        from pathlib import Path
+
+        # Load .env file first
+        self._load_env_file(config_path)
+
+        # Default values
+        self.provider = 'ollama'
+        self.base_url = 'http://localhost:11434'
+        self.model = 'llama3:8b'
+        self.timeout = 360
+        self.max_tokens = 4096
+        self.api_key = ''
+        self.online_config = {}
+        self.ollama_config = {}
+
+        # Check environment variable for provider override (highest priority)
+        env_provider = os.environ.get('LLM_PROVIDER', '').lower()
+        if env_provider in ('online', 'ollama'):
+            self.provider = env_provider
+            logger.debug(f"Provider from env: {self.provider}")
+
+        # Priority: env_provider > config_manager > config_file > parameters > defaults
+
+        if config_manager:
+            # Load from ConfigManager
+            if not env_provider:  # Only use config if env not set
+                self.provider = config_manager.get('llm', 'provider', 'ollama')
+            self.timeout = config_manager.get('llm', 'timeout', 360)
+
+            if self.provider == 'online':
+                online_cfg = config_manager.get_section('llm')
+                if online_cfg:
+                    online_data = online_cfg.data.get('online', {})
+                    self.api_key = os.environ.get('LLM_API_KEY', online_data.get('api_key', ''))
+                    self.base_url = os.environ.get('LLM_BASE_URL', online_data.get('base_url', 'https://cmkey.cn'))
+                    self.model = os.environ.get('LLM_MODEL', online_data.get('model', 'glm-5.1'))
+                    self.max_tokens = online_data.get('max_tokens', 4096)
+                    self.online_config = online_data
+            else:
+                ollama_cfg = config_manager.get_section('llm')
+                if ollama_cfg:
+                    ollama_data = ollama_cfg.data.get('ollama', {})
+                    self.base_url = os.environ.get('LLM_BASE_URL', ollama_data.get('base_url', 'http://localhost:11434'))
+                    self.model = os.environ.get('LLM_MODEL', ollama_data.get('model', 'llama3:8b'))
+                    self.ollama_config = ollama_data
+
+        elif config_path and Path(config_path).exists():
+            # Load from config file
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+
+                llm_config = config.get('llm', {})
+                if not env_provider:  # Only use config if env not set
+                    self.provider = llm_config.get('provider', 'ollama')
+                self.timeout = llm_config.get('timeout', 360)
+
+                if self.provider == 'online':
+                    online_data = llm_config.get('online', {})
+                    self.api_key = os.environ.get('LLM_API_KEY', online_data.get('api_key', ''))
+                    self.base_url = os.environ.get('LLM_BASE_URL', online_data.get('base_url', 'https://cmkey.cn'))
+                    self.model = os.environ.get('LLM_MODEL', online_data.get('model', 'glm-5.1'))
+                    self.max_tokens = online_data.get('max_tokens', 4096)
+                    self.online_config = online_data
+                else:
+                    ollama_data = llm_config.get('ollama', {})
+                    self.base_url = os.environ.get('LLM_BASE_URL', ollama_data.get('base_url', 'http://localhost:11434'))
+                    self.model = os.environ.get('LLM_MODEL', ollama_data.get('model', 'llama3:8b'))
+                    self.ollama_config = ollama_data
+            except Exception as e:
+                logger.warning(f"Failed to load config file: {e}")
+
+        else:
+            # No config_manager or config_file - use environment variables directly
+            if self.provider == 'online':
+                self.api_key = os.environ.get('LLM_API_KEY', '')
+                self.base_url = os.environ.get('LLM_BASE_URL', 'https://cmkey.cn')
+                self.model = os.environ.get('LLM_MODEL', 'glm-5.1')
+            else:
+                self.base_url = os.environ.get('LLM_BASE_URL', 'http://localhost:11434')
+                self.model = os.environ.get('LLM_MODEL', 'llama3:8b')
+
+        # Override with parameters if provided
+        if base_url:
+            self.base_url = base_url
+        if model:
+            self.model = model
+        if timeout:
+            self.timeout = timeout
+
+        # Ensure base_url doesn't have trailing slash
+        if self.base_url:
+            self.base_url = self.base_url.rstrip('/')
+
+        logger.info(f"LLM config loaded: provider={self.provider}, model={self.model}")
+
+    def _init_online_client(self):
+        """Initialize online LLM client (Anthropic-compatible API)"""
+        self.session = None  # Not needed for online client
+        self.client = None
+
+        # Try to use anthropic SDK
+        try:
+            import anthropic
+            client_kwargs = {"api_key": self.api_key}
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+            self.client = anthropic.Anthropic(**client_kwargs)
+            logger.info(f"✅ Online LLM client initialized (SDK) - model: {self.model}, url: {self.base_url}")
+        except ImportError:
+            logger.info(f"✅ Online LLM client initialized (requests) - model: {self.model}, url: {self.base_url}")
+        except Exception as e:
+            logger.warning(f"Online LLM client init failed (SDK): {e}, will use requests")
+
+        self.is_available = True  # Online models are assumed available
+
+    def _init_ollama_client(self):
+        """Initialize Ollama local client"""
+        # V2 style: Use ollama library directly (no session needed if available)
+        if OLLAMA_AVAILABLE:
+            logger.debug("Using ollama library (V2 style - no session needed)")
+            self.session = None
+        else:
+            # Fallback: Create session with connection pooling for requests
+            try:
+                self.session = requests.Session()
+                retry_strategy = Retry(
+                    total=1,
+                    backoff_factor=0.1,
+                    status_forcelist=[429, 500, 502, 503, 504],
+                )
+                adapter = HTTPAdapter(
+                    max_retries=retry_strategy,
+                    pool_connections=10,
+                    pool_maxsize=10,
+                    pool_block=False
+                )
+                self.session.mount("http://", adapter)
+                self.session.mount("https://", adapter)
+                logger.debug("Session with connection pooling initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize session with connection pooling: {e}")
+                self.session = requests.Session()
+                logger.warning("Using basic Session (no connection pooling)")
+
+        logger.info(f"✅ Ollama client initialized - model: {self.model}, url: {self.base_url}")
+
     def _check_availability(self) -> bool:
         """Check if Ollama is available and model exists"""
         try:
@@ -325,28 +478,177 @@ class OllamaManager:
         self.last_request_time = time.time()
     
     def generate(
-        self, 
-        prompt: str, 
+        self,
+        prompt: str,
         system_prompt: str = None,
         temperature: float = 0.7,
-        max_tokens: int = 1000,  # Increased for better context handling
+        max_tokens: int = 1000,
         progress_callback: Optional[callable] = None
     ) -> Optional[str]:
         """
-        Generate text using Ollama
-        
+        Generate text using configured LLM provider
+
         Args:
             prompt: User prompt
             system_prompt: System prompt (optional)
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
-            
+            progress_callback: Optional progress callback
+
+        Returns:
+            Generated text or None if failed
+        """
+        # Route to appropriate provider
+        if self.provider == 'online':
+            return self._generate_online(prompt, system_prompt, temperature, max_tokens, progress_callback)
+        else:
+            return self._generate_ollama(prompt, system_prompt, temperature, max_tokens, progress_callback)
+
+    def _generate_online(
+        self,
+        prompt: str,
+        system_prompt: str = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+        progress_callback: Optional[callable] = None
+    ) -> Optional[str]:
+        """
+        Generate text using online LLM (Anthropic-compatible API)
+
+        Args:
+            prompt: User prompt
+            system_prompt: System prompt (optional)
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+            progress_callback: Optional progress callback
+
+        Returns:
+            Generated text or None if failed
+        """
+        max_tokens = max_tokens or self.max_tokens
+
+        # Update stats
+        with self.lock:
+            self.stats['total_requests'] += 1
+
+        if progress_callback:
+            try:
+                progress_callback("Calling online LLM...")
+            except Exception:
+                pass
+
+        request_start_time = time.time()
+
+        for attempt in range(self.max_retries):
+            try:
+                if self.client:
+                    # Use anthropic SDK
+                    response = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=max_tokens,
+                        system=system_prompt or "",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=temperature
+                    )
+                    # Handle response (compatible with ThinkingBlock)
+                    text_parts = []
+                    for block in response.content:
+                        if hasattr(block, 'text'):
+                            text_parts.append(block.text)
+                        elif hasattr(block, 'type') and block.type == 'text':
+                            text_parts.append(block.text)
+                    result = "".join(text_parts)
+                else:
+                    # Use requests
+                    result = self._generate_online_requests(prompt, system_prompt, temperature, max_tokens)
+
+                if result:
+                    with self.lock:
+                        self.stats['successful_requests'] += 1
+                        self.consecutive_failures = 0
+
+                    elapsed = time.time() - request_start_time
+                    if progress_callback:
+                        try:
+                            progress_callback(f"✅ Generated ({int(elapsed)}s)")
+                        except Exception:
+                            pass
+
+                    logger.debug(f"Online LLM generated {len(result)} chars in {int(elapsed)}s")
+                    return result
+
+            except Exception as e:
+                logger.error(f"Online LLM attempt {attempt + 1} failed: {e}")
+                if attempt < self.max_retries - 1:
+                    continue
+
+        # All retries failed
+        with self.lock:
+            self.stats['failed_requests'] += 1
+            self.consecutive_failures += 1
+
+        if progress_callback:
+            try:
+                progress_callback("❌ Online LLM failed")
+            except Exception:
+                pass
+
+        return None
+
+    def _generate_online_requests(self, prompt: str, system_prompt: str, temperature: float, max_tokens: int) -> str:
+        """Call online LLM using requests library"""
+        headers = {
+            "x-api-key": self.api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
+        data = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": system_prompt or "",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature
+        }
+
+        response = requests.post(
+            f"{self.base_url}/v1/messages",
+            headers=headers,
+            json=data,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        # Handle response content
+        text_parts = []
+        for block in result.get("content", []):
+            if block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+        return "".join(text_parts)
+
+    def _generate_ollama(
+        self,
+        prompt: str,
+        system_prompt: str = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+        progress_callback: Optional[callable] = None
+    ) -> Optional[str]:
+        """
+        Generate text using Ollama
+
+        Args:
+            prompt: User prompt
+            system_prompt: System prompt (optional)
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens to generate
+
         Returns:
             Generated text or None if failed
         """
         # V2 style: NO rate limiting - let threads run freely (ollama library handles concurrency)
         # Rate limiting was causing blocking - removed for true concurrency
-        
+
         # Acquire lock only for shared state checks (not for the entire request)
         logger.debug(f"generate() called - entering lock, consecutive_failures: {self.consecutive_failures}, max: {self.max_consecutive_failures}")
         with self.lock:
@@ -1061,7 +1363,23 @@ CRITICAL FASTEXPR SYNTAX RULES:
 10. Cross-sectional operators (rank, delta) typically work with REGULAR fields
 11. Arithmetic operators: +, -, *, /, ^, %, >, <, >=, <=, ==, !=, &&, ||
 12. All parentheses must be balanced
-13. Field IDs are case-sensitive and must match EXACTLY from the available fields list"""
+13. Field IDs are case-sensitive and must match EXACTLY from the available fields list
+
+🚨 CRITICAL TIME-SERIES OPERATOR RULES:
+14. TIME-SERIES OPERATORS (ts_*) REQUIRE A LOOKBACK PARAMETER:
+   - ts_mean(field, lookback) - lookback is REQUIRED, e.g., ts_mean(eps, 20)
+   - ts_rank(field, lookback) - lookback is REQUIRED, e.g., ts_rank(eps, 30)
+   - ts_sum(field, lookback) - lookback is REQUIRED, e.g., ts_sum(eps, 10)
+   - ts_std_dev(field, lookback) - lookback is REQUIRED, e.g., ts_std_dev(eps, 20)
+   - ts_zscore(field, lookback) - lookback is REQUIRED, e.g., ts_zscore(eps, 15)
+   - ts_max(field, lookback) - lookback is REQUIRED, e.g., ts_max(eps, 10)
+   - ts_min(field, lookback) - lookback is REQUIRED, e.g., ts_min(eps, 10)
+   - WRONG: ts_mean(eps) - MISSING lookback parameter!
+   - CORRECT: ts_mean(eps, 20) - has lookback parameter
+
+15. Common lookback values: 5, 10, 20, 30, 60 (days)
+16. When using OPERATOR placeholders for time-series operators, ALWAYS include a lookback:
+   - OPERATOR1(DATA_FIELD1, 20) where OPERATOR1 is a ts_* operator"""
         
         # V3 Approach: Use operator placeholders (OPERATOR1, OPERATOR2, etc.) to avoid misspelling
         # Show all operators with definitions and let Ollama choose using placeholders

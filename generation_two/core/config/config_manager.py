@@ -168,6 +168,23 @@ class ConfigManager:
             'record_results': True,
             'storage_path': 'generation_two_records.db'
         }, "Recording and audit configuration")
+
+        # LLM provider configuration
+        self.add_section('llm', {
+            'provider': 'ollama',  # 'ollama' or 'online'
+            'online': {
+                'api_key': '',
+                'base_url': 'https://cmkey.cn',
+                'model': 'glm-5.1',
+                'max_tokens': 4096
+            },
+            'ollama': {
+                'base_url': 'http://localhost:11434',
+                'model': 'llama3:8b'
+            },
+            'timeout': 360,
+            'max_retries': 3
+        }, "LLM provider configuration (supports Ollama local and online models)")
     
     def add_section(
         self,

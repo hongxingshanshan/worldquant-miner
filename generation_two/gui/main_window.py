@@ -80,9 +80,11 @@ class CyberpunkGUI:
         # Initialize credential manager
         from ..core.credential_manager import CredentialManager
         self.credential_manager = CredentialManager(base_path=credentials_path)
-        
+
         # Initialize system (will be set after authentication)
-        self.config_manager = ConfigManager()
+        # Use correct config file path (generation_two_config, not generation_two_config.json)
+        config_path = os.path.join(os.path.dirname(__file__), '..', 'generation_two_config')
+        self.config_manager = ConfigManager(config_path=config_path)
         self.generator = None
         self.evolution_executor = None
         self.authenticated = False
@@ -179,7 +181,10 @@ class CyberpunkGUI:
             credentials = [creds.username, creds.password]
             
             # Pass credentials directly (no temp file needed)
-            self.generator = EnhancedTemplateGeneratorV3(credentials=credentials)
+            self.generator = EnhancedTemplateGeneratorV3(
+                credentials=credentials,
+                config_manager=self.config_manager
+            )
                 
         except Exception as e:
             logger.error(f"Failed to initialize generator: {e}", exc_info=True)
@@ -236,7 +241,8 @@ class CyberpunkGUI:
         # Workflow tab (first - guided experience)
         self.workflow_panel = WorkflowPanel(
             self.notebook,
-            generator=self.generator
+            generator=self.generator,
+            config_manager=self.config_manager
         )
         self.notebook.add(self.workflow_panel.frame, text="🚀 WORKFLOW")
         
