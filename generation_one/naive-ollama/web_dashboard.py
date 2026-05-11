@@ -568,57 +568,63 @@ class AlphaDashboard:
     def _format_alpha_data(self, data: Dict) -> Dict:
         """格式化 Alpha 数据为英文格式（与数据库格式一致）"""
 
+        # 安全获取嵌套数据
+        is_data = data.get("is") or {}
+        os_data = data.get("os") or {}
+        regular_data = data.get("regular") or {}
+        settings_data = data.get("settings") or {}
+
         # 格式化检查项
         checks = []
-        for check in data.get("is", {}).get("checks", []):
+        for check in is_data.get("checks", []) or []:
             checks.append({
-                "check_name": check.get("name", ""),
-                "result": check.get("result", ""),
-                "limit_value": check.get("limit", ""),
-                "actual_value": check.get("value", "")
+                "check_name": check.get("name", "") or "",
+                "result": check.get("result", "") or "",
+                "limit_value": check.get("limit", "") or "",
+                "actual_value": check.get("value", "") or ""
             })
 
         formatted = {
-            "id": data.get("id", ""),
-            "expression": data.get("regular", {}).get("code", ""),
-            "description": data.get("regular", {}).get("description"),
+            "id": data.get("id", "") or "",
+            "expression": regular_data.get("code", "") or "",
+            "description": regular_data.get("description"),
             "grade": data.get("grade"),
-            "status": data.get("status", ""),
+            "status": data.get("status", "") or "",
             "stage": data.get("stage"),
-            "date_created": data.get("dateCreated", ""),
+            "date_created": data.get("dateCreated", "") or "",
             "date_submitted": data.get("dateSubmitted"),
             "date_modified": data.get("dateModified"),
-            "operator_count": data.get("regular", {}).get("operatorCount"),
+            "operator_count": regular_data.get("operatorCount"),
             "settings": {
-                "instrument_type": data.get("settings", {}).get("instrumentType", ""),
-                "region": data.get("settings", {}).get("region", ""),
-                "universe": data.get("settings", {}).get("universe", ""),
-                "delay": data.get("settings", {}).get("delay"),
-                "decay": data.get("settings", {}).get("decay"),
-                "neutralization": data.get("settings", {}).get("neutralization", ""),
-                "truncation": data.get("settings", {}).get("truncation"),
-                "start_date": data.get("settings", {}).get("startDate", ""),
-                "end_date": data.get("settings", {}).get("endDate", ""),
+                "instrument_type": settings_data.get("instrumentType", "") or "",
+                "region": settings_data.get("region", "") or "",
+                "universe": settings_data.get("universe", "") or "",
+                "delay": settings_data.get("delay"),
+                "decay": settings_data.get("decay"),
+                "neutralization": settings_data.get("neutralization", "") or "",
+                "truncation": settings_data.get("truncation"),
+                "start_date": settings_data.get("startDate", "") or "",
+                "end_date": settings_data.get("endDate", "") or "",
             },
             "is": {
-                "sharpe": data.get("is", {}).get("sharpe"),
-                "fitness": data.get("is", {}).get("fitness"),
-                "turnover": data.get("is", {}).get("turnover"),
-                "returns": data.get("is", {}).get("returns"),
-                "drawdown": data.get("is", {}).get("drawdown"),
-                "long_count": data.get("is", {}).get("longCount"),
-                "short_count": data.get("is", {}).get("shortCount"),
-                "pnl": data.get("is", {}).get("pnl"),
-                "book_size": data.get("is", {}).get("bookSize"),
+                "sharpe": is_data.get("sharpe"),
+                "fitness": is_data.get("fitness"),
+                "turnover": is_data.get("turnover"),
+                "returns": is_data.get("returns"),
+                "drawdown": is_data.get("drawdown"),
+                "long_count": is_data.get("longCount"),
+                "short_count": is_data.get("shortCount"),
+                "pnl": is_data.get("pnl"),
+                "book_size": is_data.get("bookSize"),
             },
             "os": {
-                "sharpe": data.get("os", {}).get("sharpe"),
-                "fitness": data.get("os", {}).get("fitness"),
-                "turnover": data.get("os", {}).get("turnover"),
+                "sharpe": os_data.get("sharpe"),
+                "fitness": os_data.get("fitness"),
+                "turnover": os_data.get("turnover"),
             },
             "checks": checks,
-            "classifications": [c.get("name", "") for c in data.get("classifications", [])],
-            "tags": data.get("tags", []),
+            "classifications": [c.get("name", "") or "" for c in data.get("classifications", []) or []],
+            "tags": data.get("tags", []) or [],
         }
 
         return formatted
