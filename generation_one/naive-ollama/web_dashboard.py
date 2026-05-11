@@ -790,6 +790,18 @@ class AlphaDashboard:
                 result["success"] = True
                 result["status"] = "ALREADY_SUBMITTED"
                 result["message"] = "已提交过"
+            elif response.status_code == 403:
+                # 403 通常是检查项未通过
+                result["error"] = "提交被拒绝: Alpha 检查项未全部通过"
+                try:
+                    error_data = response.json()
+                    # 解析失败的检查项
+                    checks = error_data.get("is", {}).get("checks", [])
+                    failed_checks = [c.get("name") for c in checks if c.get("result") == "FAIL"]
+                    if failed_checks:
+                        result["error"] = f"提交被拒绝: 检查项未通过 - {', '.join(failed_checks)}"
+                except:
+                    pass
             else:
                 result["error"] = f"提交失败: HTTP {response.status_code}"
                 try:
