@@ -1,13 +1,14 @@
 """
 数据库连接模块
 
-提供 MySQL 数据库连接和基础操作
+提供 MySQL 数据库连接和基础操作，使用连接池管理连接
 """
 import pymysql
 from pymysql.cursors import DictCursor
 from contextlib import contextmanager
 from typing import Generator, Optional, List, Dict, Any
 import logging
+import threading
 
 # 使用统一日志配置
 try:
@@ -17,8 +18,71 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 
+class ConnectionPool:
+    """简单的数据库连接池"""
+
+    def __init__(self, config: dict, pool_size: int = 5):
+        """
+        初始化连接池
+
+        Args:
+            config: 数据库配置
+            pool_size: 连接池大小
+        """
+        self.config = config
+        self.pool_size = pool_size
+        self._pool = []
+        self._lock = threading.Lock()
+
+    def get(self) -> pymysql.Connection:
+        """获取连接"""
+        with self._lock:
+            if self._pool:
+                conn = self._pool.pop()
+                # 检查连接是否有效
+                try:
+                    conn.ping(reconnect=True)
+                    return conn
+                except:
+                    pass  # 连接无效，创建新连接
+
+            return pymysql.connect(**self.config)
+
+    def put(self, conn: pymysql.Connection):
+        """归还连接"""
+        with self._lock:
+            if len(self._pool) < self.pool_size:
+                try:
+                    conn.ping(reconnect=True)
+                    self._pool.append(conn)
+                except:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+            else:
+                try:
+                    conn.close()
+                except:
+                    pass
+
+    def close_all(self):
+        """关闭所有连接"""
+        with self._lock:
+            for conn in self._pool:
+                try:
+                    conn.close()
+                except:
+                    pass
+            self._pool.clear()
+
+
 class MySQLConnector:
     """MySQL 数据库连接器"""
+
+    # 全局连接池缓存
+    _pools: Dict[str, ConnectionPool] = {}
+    _pools_lock = threading.Lock()
 
     def __init__(self, config: dict):
         """
@@ -45,6 +109,13 @@ class MySQLConnector:
         }
         self._connected = False
 
+        # 获取或创建连接池
+        pool_key = f"{self.config['host']}:{self.config['port']}:{self.config['database']}"
+        with self._pools_lock:
+            if pool_key not in self._pools:
+                self._pools[pool_key] = ConnectionPool(self.config, pool_size=10)
+            self._pool = self._pools[pool_key]
+
     @contextmanager
     def get_connection(self) -> Generator:
         """
@@ -53,7 +124,7 @@ class MySQLConnector:
         Yields:
             pymysql.Connection: 数据库连接对象
         """
-        conn = pymysql.connect(**self.config)
+        conn = self._pool.get()
         try:
             yield conn
         except Exception as e:
@@ -61,7 +132,7 @@ class MySQLConnector:
             logger.error(f"数据库错误: {e}")
             raise
         finally:
-            conn.close()
+            self._pool.put(conn)
 
     def execute(self, sql: str, params: tuple = None) -> int:
         """
