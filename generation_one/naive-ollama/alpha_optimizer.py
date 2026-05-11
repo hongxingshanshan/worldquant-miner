@@ -250,6 +250,7 @@ class AlphaOptimizer:
                     })
 
                 result.append({
+                    'id': alpha_id,
                     'alpha_id': alpha_id,
                     'expression': expression,
                     'sharpe': alpha.get('is_sharpe', 0) or 0,
@@ -258,6 +259,7 @@ class AlphaOptimizer:
                     'returns': alpha.get('is_returns', 0) or 0,
                     'check_status': check_status,
                     'check_details': check_details,
+                    'failed_checks': [c['name'] for c in check_details if c['result'] == 'FAIL'],
                     'is_submittable': False,  # 有 1 项 FAIL，不可提交
                     'source': 'database'
                 })
@@ -624,24 +626,30 @@ class AlphaOptimizer:
 
                 # 验证表达式
                 if self._validate_expression(optimized_expr):
+                    # 获取失败检查项类型
+                    failed_checks = original.get("failed_checks", [])
+                    failure_type = failed_checks[0] if failed_checks else "UNKNOWN"
+
                     result = {
                         "success": True,
                         "original": original.get("expression"),
                         "optimized": optimized_expr,
-                        "alpha_id": original.get("id"),
+                        "alpha_id": original.get("id") or original.get("alpha_id"),
                         "original_metrics": {
                             "sharpe": original.get("sharpe"),
                             "fitness": original.get("fitness"),
                             "turnover": original.get("turnover")
                         },
-                        "failure_type": original.get("failed_checks", ["UNKNOWN"])[0] if original.get("failed_checks") else "UNKNOWN",
+                        "failure_type": failure_type,
+                        "failed_checks": failed_checks,
+                        "check_details": original.get("check_details", []),
                         "timestamp": datetime.now().isoformat()
                     }
                     results.append(result)
                     self.optimization_history.append(result)
 
                     logger.info(
-                        f"优化成功 [{idx+1}]: {original.get('expression', '')[:30]}... → {optimized_expr[:30]}..."
+                        f"优化成功 [{idx+1}] ({failure_type}): {original.get('expression', '')[:30]}... → {optimized_expr[:30]}..."
                     )
 
             except Exception as e:
