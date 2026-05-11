@@ -1,0 +1,13 @@
+"""
+数据库配置示例
+
+复制此文件为 db_config.json 并填入真实账密
+"""
+{
+    "host": "localhost",
+    "port": 3306,
+    "user": "your_username",
+    "password": "your_password",
+    "database": "worldquant_alpha",
+    "charset": "utf8mb4"
+}
