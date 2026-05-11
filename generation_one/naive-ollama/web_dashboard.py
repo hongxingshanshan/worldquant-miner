@@ -1062,6 +1062,11 @@ def api_sync_status():
     """API endpoint to get sync status."""
     return jsonify(dashboard.get_sync_status())
 
+@app.route('/alpha-db')
+def alpha_db_page():
+    """Alpha database management page."""
+    return render_template('alpha_db.html')
+
 def setup_cleanup_handler():
     """设置 Windows 控制台关闭事件处理器"""
     def cleanup():

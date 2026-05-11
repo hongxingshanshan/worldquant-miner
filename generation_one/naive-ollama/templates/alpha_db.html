@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alpha 数据库管理</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 25px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+        }
+
+        .header-links {
+            display: flex;
+            gap: 15px;
+        }
+
+        .header-links a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .header-links a:hover {
+            text-decoration: underline;
+        }
+
+        /* 同步区域 */
+        .sync-section {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .sync-info {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .sync-info span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* 筛选区域 */
+        .filter-section {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-group label {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .filter-group select {
+            padding: 6px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+            min-width: 150px;
+        }
+
+        .filter-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        /* 按钮 */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Alpha 表格 */
+        .alpha-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .alpha-card-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .alpha-card-header h3 {
+            font-size: 16px;
+            color: #333;
+        }
+
+        .alpha-table-container {
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .alpha-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .alpha-table th {
+            background: #f5f5f5;
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            position: sticky;
+            top: 0;
+            border-bottom: 2px solid #ddd;
+            white-space: nowrap;
+        }
+
+        .alpha-table td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            vertical-align: middle;
+        }
+
+        .alpha-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        .alpha-id-link {
+            color: #667eea;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .alpha-id-link:hover {
+            text-decoration: underline;
+        }
+
+        .alpha-expr {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #555;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .label {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .label-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .label-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .label-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .label-info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .label-default {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        .metric-good {
+            color: #4CAF50;
+            font-weight: 600;
+        }
+
+        .metric-medium {
+            color: #ff9800;
+            font-weight: 600;
+        }
+
+        .metric-bad {
+            color: #f44336;
+            font-weight: 600;
+        }
+
+        .checks-cell {
+            font-size: 11px;
+        }
+
+        .checks-pass {
+            color: #4CAF50;
+            font-weight: 600;
+        }
+
+        .checks-fail {
+            color: #f44336;
+            font-weight: 600;
+        }
+
+        .action-btn {
+            padding: 4px 10px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+            margin-right: 4px;
+            margin-bottom: 2px;
+        }
+
+        /* 详情弹窗 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .modal.show {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 900px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            font-size: 18px;
+            color: #333;
+        }
+
+        .modal-close {
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .detail-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .detail-section h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 14px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 5px;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 12px;
+        }
+
+        .detail-label {
+            color: #666;
+        }
+
+        .detail-value {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .expression-box {
+            background: #1e1e1e;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+
+        .checks-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .checks-table th, .checks-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .checks-table th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+
+        .result-pass {
+            color: #4CAF50;
+            font-weight: 600;
+        }
+
+        .result-fail {
+            color: #f44336;
+            font-weight: 600;
+        }
+
+        /* 加载状态 */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-list {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        /* 旋转动画 */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .spinning {
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .filter-section {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .alpha-table {
+                font-size: 11px;
+            }
+
+            .alpha-table th, .alpha-table td {
+                padding: 8px 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>📊 Alpha 数据库管理</h1>
+            </div>
+            <div class="header-links">
+                <a href="/">← 返回仪表盘</a>
+            </div>
+        </div>
+
+        <!-- 同步区域 -->
+        <div class="sync-section">
+            <button id="syncBtn" class="btn btn-primary" onclick="syncIncremental()">
+                <span>🔄</span> 增量同步
+            </button>
+            <button id="syncFullBtn" class="btn btn-secondary" onclick="syncFull()">
+                全量同步
+            </button>
+            <div class="sync-info">
+                <span>📦 总数: <strong id="alphaCount">-</strong></span>
+                <span>⏰ 最后同步: <strong id="lastSyncTime">-</strong></span>
+                <span>🆕 最新创建: <strong id="lastCreatedTime">-</strong></span>
+            </div>
+        </div>
+
+        <!-- 筛选区域 -->
+        <div class="filter-section">
+            <div class="filter-group">
+                <label>排序:</label>
+                <select id="orderSelect" onchange="refreshAlphaList()">
+                    <option value="is_checks_pass">按 IS 检查通过数</option>
+                    <option value="sharpe">按 IS Sharpe</option>
+                    <option value="fitness">按 IS Fitness</option>
+                    <option value="date_created">按创建时间</option>
+                    <option value="date_modified">按修改时间</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>状态:</label>
+                <select id="statusFilter" onchange="refreshAlphaList()">
+                    <option value="">全部</option>
+                    <option value="UNSUBMITTED">未提交</option>
+                    <option value="SUBMITTED">已提交</option>
+                    <option value="CORRELATED">已关联</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>阶段:</label>
+                <select id="stageFilter" onchange="refreshAlphaList()">
+                    <option value="">全部</option>
+                    <option value="IS">IS</option>
+                    <option value="OS">OS</option>
+                    <option value="PROD">PROD</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>数量:</label>
+                <select id="limitSelect" onchange="refreshAlphaList()">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                </select>
+            </div>
+            <button class="btn btn-success" onclick="refreshAlphaList()">
+                <span>🔍</span> 刷新
+            </button>
+        </div>
+
+        <!-- Alpha 列表 -->
+        <div class="alpha-card">
+            <div class="alpha-card-header">
+                <h3>📋 Alpha 列表</h3>
+                <span id="listInfo">-</span>
+            </div>
+            <div class="alpha-table-container">
+                <table class="alpha-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>表达式</th>
+                            <th>等级</th>
+                            <th>状态</th>
+                            <th>已提交</th>
+                            <th>IS Sharpe</th>
+                            <th>IS Fitness</th>
+                            <th>IS Turnover</th>
+                            <th>OS Sharpe</th>
+                            <th>IS 检查</th>
+                            <th>OS 检查</th>
+                            <th>可提交</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="alphaTableBody">
+                        <tr>
+                            <td colspan="14" class="loading">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div class="modal" id="detailModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📈 Alpha 详情 - <span id="modalAlphaId"></span></h3>
+                <span class="modal-close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="modalBody">
+                加载中...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            updateSyncStatus();
+            refreshAlphaList();
+        });
+
+        // 更新同步状态
+        async function updateSyncStatus() {
+            try {
+                const response = await fetch('/api/sync/status');
+                const data = await response.json();
+
+                document.getElementById('alphaCount').textContent = data.total_alphas || '-';
+                document.getElementById('lastSyncTime').textContent = formatDateTime(data.last_sync_time);
+                document.getElementById('lastCreatedTime').textContent = formatDateTime(data.last_created_time);
+            } catch (error) {
+                console.error('获取同步状态失败:', error);
+            }
+        }
+
+        // 刷新 Alpha 列表
+        async function refreshAlphaList() {
+            const tbody = document.getElementById('alphaTableBody');
+            tbody.innerHTML = '<tr><td colspan="14" class="loading">加载中...</td></tr>';
+
+            const order = document.getElementById('orderSelect').value;
+            const status = document.getElementById('statusFilter').value;
+            const stage = document.getElementById('stageFilter').value;
+            const limit = document.getElementById('limitSelect').value;
+
+            try {
+                const params = new URLSearchParams({
+                    order: order,
+                    limit: limit
+                });
+                if (status) params.append('status', status);
+                if (stage) params.append('stage', stage);
+
+                const response = await fetch(`/api/alphas?${params}`);
+                const data = await response.json();
+
+                document.getElementById('listInfo').textContent = `共 ${data.total} 条`;
+
+                if (!data.alphas || data.alphas.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="14" class="empty-list">暂无数据</td></tr>';
+                    return;
+                }
+
+                renderAlphaTable(data.alphas);
+            } catch (error) {
+                tbody.innerHTML = `<tr><td colspan="14" class="empty-list">加载失败: ${error}</td></tr>`;
+            }
+        }
+
+        // 渲染表格
+        function renderAlphaTable(alphas) {
+            const tbody = document.getElementById('alphaTableBody');
+            tbody.innerHTML = '';
+
+            alphas.forEach(alpha => {
+                const row = document.createElement('tr');
+
+                // IS 检查
+                const isChecksPass = alpha.is_checks_pass || 0;
+                const isChecksFail = alpha.is_checks_fail || 0;
+                const isChecksHtml = `<span class="checks-pass">${isChecksPass}</span>/<span class="checks-fail">${isChecksFail}</span>`;
+
+                // OS 检查
+                const osChecksPass = alpha.os_checks_pass || 0;
+                const osChecksFail = alpha.os_checks_fail || 0;
+                const osChecksHtml = `<span class="checks-pass">${osChecksPass}</span>/<span class="checks-fail">${osChecksFail}</span>`;
+
+                // Sharpe 颜色
+                const sharpe = alpha.is_sharpe;
+                let sharpeClass = '';
+                if (sharpe) {
+                    if (sharpe >= 1.5) sharpeClass = 'metric-good';
+                    else if (sharpe >= 1.0) sharpeClass = 'metric-medium';
+                    else sharpeClass = 'metric-bad';
+                }
+
+                // 状态标签
+                const statusLabel = getStatusLabel(alpha.status);
+
+                // 已提交
+                const submittedLabel = alpha.is_submitted
+                    ? '<span class="label label-success">是</span>'
+                    : '<span class="label label-default">否</span>';
+
+                // 可提交
+                const submittableLabel = alpha.is_submittable
+                    ? '<span class="label label-success">可提交</span>'
+                    : '<span class="label label-danger">不可提交</span>';
+
+                row.innerHTML = `
+                    <td><a class="alpha-id-link" onclick="showDetail('${alpha.id}')">${alpha.id}</a></td>
+                    <td><div class="alpha-expr" title="${escapeHtml(alpha.expression || '')}">${escapeHtml((alpha.expression || '').substring(0, 40))}${(alpha.expression || '').length > 40 ? '...' : ''}</div></td>
+                    <td>${alpha.grade || '-'}</td>
+                    <td>${statusLabel}</td>
+                    <td>${submittedLabel}</td>
+                    <td class="${sharpeClass}">${sharpe ? sharpe.toFixed(4) : '-'}</td>
+                    <td>${alpha.is_fitness ? alpha.is_fitness.toFixed(4) : '-'}</td>
+                    <td>${alpha.is_turnover ? alpha.is_turnover.toFixed(4) : '-'}</td>
+                    <td>${alpha.os_sharpe ? alpha.os_sharpe.toFixed(4) : '-'}</td>
+                    <td class="checks-cell">${isChecksHtml}</td>
+                    <td class="checks-cell">${osChecksHtml}</td>
+                    <td>${submittableLabel}</td>
+                    <td>${formatDateTime(alpha.date_created)}</td>
+                    <td>
+                        <button class="action-btn btn-primary" onclick="showDetail('${alpha.id}')">详情</button>
+                        <button class="action-btn btn-warning" onclick="optimizeAlpha('${alpha.id}')">优化</button>
+                    </td>
+                `;
+
+                tbody.appendChild(row);
+            });
+        }
+
+        // 获取状态标签
+        function getStatusLabel(status) {
+            const statusMap = {
+                'UNSUBMITTED': '<span class="label label-default">未提交</span>',
+                'SUBMITTED': '<span class="label label-info">已提交</span>',
+                'CORRELATED': '<span class="label label-warning">已关联</span>',
+                'SIMULATING': '<span class="label label-info">模拟中</span>'
+            };
+            return statusMap[status] || `<span class="label label-default">${status || '-'}</span>`;
+        }
+
+        // 显示详情
+        async function showDetail(alphaId) {
+            document.getElementById('modalAlphaId').textContent = alphaId;
+            document.getElementById('modalBody').innerHTML = '加载中...';
+            document.getElementById('detailModal').classList.add('show');
+
+            try {
+                const response = await fetch(`/api/alpha-db/${alphaId}`);
+                const result = await response.json();
+
+                if (!result.success) {
+                    document.getElementById('modalBody').innerHTML = `<div class="empty-list">${result.error}</div>`;
+                    return;
+                }
+
+                renderDetail(result.data);
+            } catch (error) {
+                document.getElementById('modalBody').innerHTML = `<div class="empty-list">加载失败: ${error}</div>`;
+            }
+        }
+
+        // 渲染详情
+        function renderDetail(alpha) {
+            const modalBody = document.getElementById('modalBody');
+
+            let html = `
+                <div class="detail-grid">
+                    <div class="detail-section">
+                        <h4>基本信息</h4>
+                        <div class="detail-item"><span class="detail-label">ID</span><span class="detail-value">${alpha.id}</span></div>
+                        <div class="detail-item"><span class="detail-label">等级</span><span class="detail-value">${alpha.grade || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">状态</span><span class="detail-value">${alpha.status || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">阶段</span><span class="detail-value">${alpha.stage || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">操作符数量</span><span class="detail-value">${alpha.operator_count || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">创建时间</span><span class="detail-value">${formatDateTime(alpha.date_created)}</span></div>
+                        <div class="detail-item"><span class="detail-label">提交时间</span><span class="detail-value">${formatDateTime(alpha.date_submitted)}</span></div>
+                        <div class="detail-item"><span class="detail-label">同步时间</span><span class="detail-value">${formatDateTime(alpha.synced_at)}</span></div>
+                    </div>
+            `;
+
+            // IS 性能指标
+            if (alpha.is) {
+                html += `
+                    <div class="detail-section">
+                        <h4>IS 性能指标</h4>
+                        <div class="detail-item"><span class="detail-label">Sharpe</span><span class="detail-value">${alpha.is.sharpe?.toFixed(6) || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">Fitness</span><span class="detail-value">${alpha.is.fitness?.toFixed(6) || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">Turnover</span><span class="detail-value">${alpha.is.turnover?.toFixed(6) || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">Returns</span><span class="detail-value">${alpha.is.returns?.toFixed(6) || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">Drawdown</span><span class="detail-value">${alpha.is.drawdown?.toFixed(6) || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">Long Count</span><span class="detail-value">${alpha.is.long_count || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">Short Count</span><span class="detail-value">${alpha.is.short_count || '-'}</span></div>
+                    </div>
+                `;
+            }
+
+            // OS 性能指标
+            if (alpha.os) {
+                html += `
+                    <div class="detail-section">
+                        <h4>OS 性能指标</h4>
+                        <div class="detail-item"><span class="detail-label">Sharpe</span><span class="detail-value">${alpha.os.sharpe?.toFixed(6) || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">Fitness</span><span class="detail-value">${alpha.os.fitness?.toFixed(6) || '-'}</span></div>
+                        <div class="detail-item"><span class="detail-label">Turnover</span><span class="detail-value">${alpha.os.turnover?.toFixed(6) || '-'}</span></div>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+
+            // 表达式
+            html += `
+                <div class="detail-section">
+                    <h4>Alpha 表达式</h4>
+                    <div class="expression-box">${escapeHtml(alpha.expression || '-')}</div>
+                </div>
+            `;
+
+            // 检查结果
+            if (alpha.checks && alpha.checks.length > 0) {
+                html += `
+                    <div class="detail-section">
+                        <h4>检查结果</h4>
+                        <table class="checks-table">
+                            <thead>
+                                <tr>
+                                    <th>阶段</th>
+                                    <th>检查项</th>
+                                    <th>结果</th>
+                                    <th>限制值</th>
+                                    <th>实际值</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                alpha.checks.forEach(check => {
+                    const resultClass = check.result === 'PASS' ? 'result-pass' : 'result-fail';
+                    html += `
+                        <tr>
+                            <td>${check.stage}</td>
+                            <td>${check.check_name}</td>
+                            <td class="${resultClass}">${check.result}</td>
+                            <td>${check.limit_value || '-'}</td>
+                            <td>${check.actual_value || '-'}</td>
+                        </tr>
+                    `;
+                });
+
+                html += '</tbody></table></div>';
+            }
+
+            modalBody.innerHTML = html;
+        }
+
+        // 关闭弹窗
+        function closeModal() {
+            document.getElementById('detailModal').classList.remove('show');
+        }
+
+        // 点击弹窗外部关闭
+        document.getElementById('detailModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+
+        // 增量同步
+        async function syncIncremental() {
+            const btn = document.getElementById('syncBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinning">🔄</span> 同步中...';
+
+            try {
+                const response = await fetch('/api/sync', { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`同步完成!\n新增: ${result.stats.new}\n更新: ${result.stats.updated}\n跳过: ${result.stats.skipped}`);
+                    updateSyncStatus();
+                    refreshAlphaList();
+                } else {
+                    alert('同步失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('同步失败: ' + error);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>🔄</span> 增量同步';
+            }
+        }
+
+        // 全量同步
+        async function syncFull() {
+            if (!confirm('确定要执行全量同步吗？可能需要较长时间。')) {
+                return;
+            }
+
+            const btn = document.getElementById('syncFullBtn');
+            btn.disabled = true;
+            btn.innerHTML = '同步中...';
+
+            try {
+                const response = await fetch('/api/sync/full', { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`全量同步完成!\n总数: ${result.stats.total}\n新增: ${result.stats.new}\n更新: ${result.stats.updated}`);
+                    updateSyncStatus();
+                    refreshAlphaList();
+                } else {
+                    alert('同步失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('同步失败: ' + error);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '全量同步';
+            }
+        }
+
+        // 优化 Alpha
+        async function optimizeAlpha(alphaId) {
+            if (!confirm(`确定要优化 Alpha ${alphaId} 吗？`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/optimize-alpha/${alphaId}`, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`优化成功!\n模拟任务 ID: ${result.simulation_id || '无'}`);
+                } else {
+                    alert('优化失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('优化失败: ' + error);
+            }
+        }
+
+        // 格式化日期时间
+        function formatDateTime(dt) {
+            if (!dt) return '-';
+            try {
+                const date = new Date(dt);
+                return date.toLocaleString('zh-CN');
+            } catch {
+                return dt;
+            }
+        }
+
+        // HTML 转义
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ESC 关闭弹窗
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
