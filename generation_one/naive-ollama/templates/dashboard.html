@@ -871,7 +871,12 @@
         function renderAlphaResult(data) {
             const resultDiv = document.getElementById('queryResult');
 
-            const gradeClass = data.等级 === '优秀' ? 'pass' : data.等级 === '较差' ? 'fail' : '';
+            const gradeClass = data.grade === 'EXCELLENT' ? 'pass' : data.grade === 'INFERIOR' ? 'fail' : '';
+            const gradeLabels = { 'EXCELLENT': '优秀', 'GOOD': '良好', 'AVERAGE': '一般', 'INFERIOR': '较差', 'UNKNOWN': '未知' };
+            const statusLabels = { 'UNSUBMITTED': '未提交', 'SUBMITTED': '已提交', 'ACTIVE': '活跃', 'CORRELATION': '相关性检查中' };
+            const checkLabels = { 'PASS': '通过', 'FAIL': '未通过', 'PENDING': '待检查', 'ERROR': '错误' };
+
+            const isPerf = data.is || {};
 
             let html = `
                 <div class="result-container">
@@ -880,45 +885,42 @@
                         <div class="result-section">
                             <h4>基本信息</h4>
                             <div class="result-item"><span class="result-label">Alpha ID</span><span class="result-value">${data.id}</span></div>
-                            <div class="result-item"><span class="result-label">等级</span><span class="result-value ${gradeClass}">${data.等级}</span></div>
-                            <div class="result-item"><span class="result-label">状态</span><span class="result-value">${data.状态}</span></div>
-                            <div class="result-item"><span class="result-label">创建时间</span><span class="result-value">${formatTimestamp(data.创建时间)}</span></div>
+                            <div class="result-item"><span class="result-label">等级</span><span class="result-value ${gradeClass}">${gradeLabels[data.grade] || data.grade || '未知'}</span></div>
+                            <div class="result-item"><span class="result-label">状态</span><span class="result-value">${statusLabels[data.status] || data.status || '未知'}</span></div>
+                            <div class="result-item"><span class="result-label">创建时间</span><span class="result-value">${formatTimestamp(data.date_created)}</span></div>
                         </div>
                         <div class="result-section">
                             <h4>IS 性能指标</h4>
-                            ${Object.entries(data.IS性能).map(([key, value]) => {
-                                if (value === null || value === undefined || value === '') return '';
-                                let displayValue = value;
-                                if (key === '适应度' || key === '收益率' || key === '最大回撤' || key === '换手率') {
-                                    displayValue = typeof value === 'number' ? value.toFixed(4) : value;
-                                }
-                                return `<div class="result-item"><span class="result-label">${key}</span><span class="result-value">${displayValue}</span></div>`;
-                            }).join('')}
+                            ${isPerf.sharpe ? `<div class="result-item"><span class="result-label">夏普比率</span><span class="result-value">${isPerf.sharpe.toFixed(4)}</span></div>` : ''}
+                            ${isPerf.fitness ? `<div class="result-item"><span class="result-label">适应度</span><span class="result-value">${isPerf.fitness.toFixed(4)}</span></div>` : ''}
+                            ${isPerf.turnover ? `<div class="result-item"><span class="result-label">换手率</span><span class="result-value">${isPerf.turnover.toFixed(4)}</span></div>` : ''}
+                            ${isPerf.returns ? `<div class="result-item"><span class="result-label">收益率</span><span class="result-value">${isPerf.returns.toFixed(4)}</span></div>` : ''}
+                            ${isPerf.drawdown ? `<div class="result-item"><span class="result-label">最大回撤</span><span class="result-value">${isPerf.drawdown.toFixed(4)}</span></div>` : ''}
                         </div>
                     </div>
                     <div class="result-section" style="margin-top: 12px;">
                         <h4>Alpha 表达式</h4>
-                        <div class="expression-box">${data.表达式}</div>
+                        <div class="expression-box">${data.expression || '-'}</div>
                     </div>
-                    ${data.检查项 && data.检查项.length > 0 ? `
+                    ${data.checks && data.checks.length > 0 ? `
                     <div class="result-section" style="margin-top: 12px;">
                         <h4>检查项</h4>
                         <table class="checks-table">
                             <thead><tr><th>检查项</th><th>结果</th><th>限制值</th><th>实际值</th></tr></thead>
                             <tbody>
-                                ${data.检查项.map(check => `
+                                ${data.checks.map(check => `
                                 <tr>
-                                    <td>${check.名称}</td>
-                                    <td class="${check.结果 === '通过' ? 'pass' : check.结果 === '未通过' ? 'fail' : 'pending'}">${check.结果}</td>
-                                    <td>${check.限制 || '-'}</td>
-                                    <td>${check.值 || '-'}</td>
+                                    <td>${check.check_name}</td>
+                                    <td class="${check.result === 'PASS' ? 'pass' : check.result === 'FAIL' ? 'fail' : 'pending'}">${checkLabels[check.result] || check.result}</td>
+                                    <td>${check.limit_value || '-'}</td>
+                                    <td>${check.actual_value || '-'}</td>
                                 </tr>
                                 `).join('')}
                             </tbody>
                         </table>
                     </div>
                     ` : ''}
-                    ${data.状态 === '未提交' && data.检查项 && data.检查项.some(c => c.结果 === '未通过') ? `
+                    ${data.status === 'UNSUBMITTED' && data.failed_checks && data.failed_checks.length > 0 ? `
                     <div class="result-section" style="margin-top: 12px;">
                         <button class="btn btn-success" onclick="optimizeAlpha('${data.id}')" id="optimizeBtn_${data.id}">🔧 优化此 Alpha</button>
                         <span id="optimizeStatus_${data.id}" style="margin-left: 10px;"></span>
