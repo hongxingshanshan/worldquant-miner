@@ -156,10 +156,10 @@ class AlphaSyncService:
         """
         增量同步（按创建时间）
 
-        遍历按创建时间倒序排列的 Alpha，遇到已存在的就停止
+        获取数据库中最新的 date_created，同步该时间之后创建的 Alpha
 
         Args:
-            since: 上次同步时间（未使用，保留兼容性）
+            since: 上次同步时间（可选，默认使用数据库中最新的 date_created）
             batch_size: 每批次获取数量
 
         Returns:
@@ -169,9 +169,18 @@ class AlphaSyncService:
         start_time = datetime.now()
         self.stats = {'total': 0, 'new': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
 
+        # 获取数据库中最新的 date_created
+        if since is None:
+            result = self.db.query_one("SELECT MAX(date_created) as max_date FROM alpha")
+            if result and result.get('max_date'):
+                since = result['max_date']
+                # 确保是 naive datetime（去掉时区信息）
+                if hasattr(since, 'tzinfo') and since.tzinfo is not None:
+                    since = since.replace(tzinfo=None)
+                logger.info(f"从数据库获取最新创建时间: {since}")
+
         offset = 0
-        should_stop = False
-        while not should_stop:
+        while True:
             try:
                 alphas = self._fetch_alphas(limit=batch_size, offset=offset, order='-dateCreated')
                 if not alphas:
@@ -179,6 +188,17 @@ class AlphaSyncService:
 
                 for alpha in alphas:
                     alpha_id = alpha.get('id')
+                    alpha_date_created = self._parse_datetime(alpha.get('dateCreated'))
+
+                    # 如果指定了 since，且 Alpha 创建时间早于 since，跳过
+                    if since and alpha_date_created:
+                        # 统一为 naive datetime 比较
+                        if hasattr(alpha_date_created, 'tzinfo') and alpha_date_created.tzinfo is not None:
+                            alpha_date_created = alpha_date_created.replace(tzinfo=None)
+                        if alpha_date_created <= since:
+                            self.stats['skipped'] += 1
+                            continue
+
                     # 检查是否已存在
                     existing = self.db.query_one(
                         "SELECT id FROM alpha WHERE id = %s", (alpha_id,)
@@ -187,16 +207,13 @@ class AlphaSyncService:
                         # 已存在，更新数据
                         self._save_alpha(alpha)
                         self.stats['updated'] += 1
-                        # 由于按创建时间倒序，遇到已存在的说明后续都已同步
-                        should_stop = True
                     else:
                         # 新数据
                         self._save_alpha(alpha)
                         self.stats['new'] += 1
 
                 self.stats['total'] += len(alphas)
-                if not should_stop:
-                    offset += batch_size
+                offset += batch_size
 
             except Exception as e:
                 logger.error(f"增量同步错误: {e}")
@@ -204,6 +221,7 @@ class AlphaSyncService:
                 break
 
         self._log_sync('INCREMENTAL', start_time)
+        logger.info(f"增量同步完成: {self.stats}")
         return self.stats
 
     def _fetch_alphas(self, limit: int = 100, offset: int = 0, order: str = '-dateCreated') -> List[Dict]:
