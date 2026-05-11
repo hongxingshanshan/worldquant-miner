@@ -137,22 +137,92 @@ fnd6_mfma2_oancf, operating_income, est_eps, implied_volatility_call_120, implie
 class AlphaOptimizer:
     """Alpha 优化器"""
 
-    def __init__(self, llm_client, wq_client=None):
+    def __init__(self, llm_client, wq_client=None, query_service=None):
         """
         初始化优化器
 
         Args:
             llm_client: LLM 客户端
             wq_client: WorldQuant 客户端（可选）
+            query_service: 数据库查询服务（可选）
         """
         self.llm_client = llm_client
         self.wq_client = wq_client
+        self.query_service = query_service
         self.optimization_history = []
         self.optimization_stats = {
             "total_attempts": 0,
             "successful": 0,
             "failed": 0
         }
+
+    def set_query_service(self, query_service):
+        """设置数据库查询服务"""
+        self.query_service = query_service
+
+    def get_optimizable_from_db(self, limit: int = 50) -> List[Dict]:
+        """
+        从数据库获取可优化的 Alpha（IS 检查通过 6 项，失败 1 项）
+
+        Args:
+            limit: 最大返回数量
+
+        Returns:
+            可优化的 Alpha 列表
+        """
+        if not self.query_service:
+            logger.warning("数据库查询服务未设置，无法从数据库获取 Alpha")
+            return []
+
+        try:
+            alphas = self.query_service.get_optimizable_alphas(limit=limit)
+            logger.info(f"从数据库获取到 {len(alphas)} 个可优化的 Alpha（IS 检查 6 PASS / 1 FAIL）")
+
+            # 转换为优化器需要的格式
+            result = []
+            for alpha in alphas:
+                alpha_id = alpha['id']
+                expression = alpha.get('expression', '')
+
+                if not expression:
+                    continue
+
+                # 获取检查项详情
+                checks_detail = self.query_service.get_alpha_checks_detail(alpha_id)
+
+                # 构建 check_status 和 check_details
+                check_status = {}
+                check_details = []
+                for check in checks_detail:
+                    check_name = check['check_name']
+                    result_val = check['result']
+                    check_status[check_name] = result_val == 'PASS'
+                    check_details.append({
+                        'name': check_name,
+                        'result': result_val,
+                        'limit': check.get('limit_value'),
+                        'value': check.get('actual_value')
+                    })
+
+                result.append({
+                    'alpha_id': alpha_id,
+                    'expression': expression,
+                    'sharpe': alpha.get('is_sharpe', 0) or 0,
+                    'fitness': alpha.get('is_fitness', 0) or 0,
+                    'turnover': alpha.get('is_turnover', 0) or 0,
+                    'returns': alpha.get('is_returns', 0) or 0,
+                    'check_status': check_status,
+                    'check_details': check_details,
+                    'is_submittable': False,  # 有 1 项 FAIL，不可提交
+                    'source': 'database'
+                })
+
+            logger.info(f"转换完成: {len(result)} 个 Alpha 可用于优化")
+            return result
+
+        except Exception as e:
+            logger.error(f"从数据库获取可优化 Alpha 失败: {e}")
+            return []
 
     def get_failed_alphas(self, min_sharpe: float = 1.0, limit: int = 50) -> List[Dict]:
         """
@@ -410,19 +480,28 @@ class AlphaOptimizer:
             }
 
     def optimize_top_failed(self, top_n: int = 5, min_sharpe: float = 1.0,
-                           temperature: float = 0.5) -> List[Dict]:
+                           temperature: float = 0.5, use_db: bool = False) -> List[Dict]:
         """
         优化前 N 个失败的 Alpha
 
         Args:
             top_n: 优化数量
-            min_sharpe: 最低 Sharpe 阈值
+            min_sharpe: 最低 Sharpe 阈值（仅 API 模式使用）
             temperature: LLM 温度参数
+            use_db: 是否从数据库获取优化候选（IS 检查 6 PASS, 1 FAIL）
 
         Returns:
             优化结果列表
         """
-        failed_alphas = self.get_failed_alphas(min_sharpe=min_sharpe, limit=top_n)
+        # 根据模式选择数据源
+        if use_db:
+            if not self.query_service:
+                logger.error("数据库服务不可用，无法从数据库获取优化候选")
+                return []
+            failed_alphas = self.get_optimizable_from_db(limit=top_n)
+            logger.info(f"从数据库获取到 {len(failed_alphas)} 个优化候选（IS 检查 6 PASS, 1 FAIL）")
+        else:
+            failed_alphas = self.get_failed_alphas(min_sharpe=min_sharpe, limit=top_n)
 
         if not failed_alphas:
             logger.info("没有符合条件的失败 Alpha 需要优化")

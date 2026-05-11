@@ -34,8 +34,8 @@
   "optimization": {
     "enabled": true,
     "min_sharpe": 1.0,
-    "optimize_per_cycle": 5,
-    "generate_per_cycle": 5,
+    "optimize_per_cycle": 20,
+    "generate_per_cycle": 20,
     "temperature": 0.5
   },
   "simulation": {

@@ -4,7 +4,7 @@ import json
 import os
 from time import sleep
 from requests.auth import HTTPBasicAuth
-from typing import List, Dict
+from typing import List, Dict, Optional
 import time
 import re
 import logging
@@ -788,8 +788,8 @@ class AlphaGenerator:
         self.optimization_config = {
             'enabled': True,
             'min_sharpe': 1.0,
-            'optimize_per_cycle': 5,
-            'generate_per_cycle': 5,
+            'optimize_per_cycle': 20,
+            'generate_per_cycle': 20,
             'temperature': 0.5
         }
 
@@ -1124,7 +1124,10 @@ class AlphaGenerator:
                 # fallback: 使用全部字段
                 sampled_field_ids = [field['id'] for field in data_fields]
 
-            prompt = f"""Generate 20 unique alpha factor expressions using the available operators and data fields. Return ONLY the expressions, one per line, with no comments or explanations.
+            # 获取每轮生成数量配置
+            generate_count = self.optimization_config.get('generate_per_cycle', 20)
+
+            prompt = f"""Generate {generate_count} unique alpha factor expressions using the available operators and data fields. Return ONLY the expressions, one per line, with no comments or explanations.
 
 Available Data Fields (Sampled {len(sampled_field_ids)} high-coverage fields):
 {sampled_field_ids}
@@ -1924,9 +1927,13 @@ Strategy Suggestions (pick one or combine):
         """Get all processed results including retried alphas."""
         return self.results
 
-    def optimize_failed_alphas(self) -> List[Dict]:
+    def optimize_failed_alphas(self, use_db: bool = False, db_config: dict = None) -> List[Dict]:
         """
         优化失败的 Alpha
+
+        Args:
+            use_db: 是否从数据库获取优化候选（IS 检查 6 PASS, 1 FAIL）
+            db_config: 数据库配置（可选，默认从配置文件加载）
 
         Returns:
             优化结果列表
@@ -1938,18 +1945,43 @@ Strategy Suggestions (pick one or combine):
         # 设置 WorldQuant 客户端给优化器
         self.optimizer.set_wq_client(self)
 
+        # 如果使用数据库模式，初始化数据库查询服务
+        if use_db and not self.optimizer.query_service:
+            try:
+                # 尝试从配置文件加载数据库配置
+                if not db_config:
+                    db_config = self._load_db_config()
+
+                if db_config:
+                    # 添加项目根目录到 Python 路径
+                    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+                    if project_root not in sys.path:
+                        sys.path.insert(0, project_root)
+                    from db.alpha_query_service import AlphaQueryService
+                    query_service = AlphaQueryService(db_config)
+                    self.optimizer.set_query_service(query_service)
+                    logger.info("数据库查询服务初始化成功")
+                else:
+                    logger.warning("未找到数据库配置，将使用 API 模式")
+                    use_db = False
+            except Exception as e:
+                logger.error(f"数据库查询服务初始化失败: {e}")
+                use_db = False
+
         # 获取优化配置
         min_sharpe = self.optimization_config.get('min_sharpe', 1.0)
         top_n = self.optimization_config.get('optimize_per_cycle', 5)
         temperature = self.optimization_config.get('temperature', 0.5)
 
-        logger.info(f"开始优化失败的 Alpha (min_sharpe={min_sharpe}, top_n={top_n})")
+        mode_str = "数据库模式（IS 检查 6 PASS, 1 FAIL）" if use_db else f"API 模式 (min_sharpe={min_sharpe})"
+        logger.info(f"开始优化失败的 Alpha - {mode_str}, top_n={top_n}")
 
         try:
             results = self.optimizer.optimize_top_failed(
                 top_n=top_n,
                 min_sharpe=min_sharpe,
-                temperature=temperature
+                temperature=temperature,
+                use_db=use_db
             )
 
             # 将优化结果添加到队列
@@ -1971,6 +2003,28 @@ Strategy Suggestions (pick one or combine):
         except Exception as e:
             logger.error(f"优化失败: {e}")
             return []
+
+    def _load_db_config(self) -> Optional[Dict]:
+        """从配置文件加载数据库配置"""
+        # 尝试多个可能的数据库配置文件路径
+        possible_paths = [
+            os.path.join(os.path.dirname(__file__), '..', '..', 'db', 'db_config.json'),
+            os.path.join(os.path.dirname(__file__), 'db_config.json'),
+            os.path.join(os.path.dirname(self.config_path), 'db_config.json'),
+        ]
+
+        for db_config_path in possible_paths:
+            if os.path.exists(db_config_path):
+                try:
+                    with open(db_config_path, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                    logger.info(f"已加载数据库配置: {db_config_path}")
+                    return config
+                except Exception as e:
+                    logger.warning(f"加载数据库配置失败 ({db_config_path}): {e}")
+
+        logger.warning("未找到数据库配置文件")
+        return None
 
     def get_user_alphas(self) -> List[Dict]:
         """
@@ -2349,7 +2403,7 @@ def main():
                 if generator.optimization_enabled:
                     logger.info("步骤 2: 优化失败的 Alpha...")
                     try:
-                        optimized_results = generator.optimize_failed_alphas()
+                        optimized_results = generator.optimize_failed_alphas(use_db=True)
                         if optimized_results:
                             logger.info(f"优化完成: {len(optimized_results)} 个，已加入队列")
                     except Exception as e:

@@ -561,70 +561,59 @@ class AlphaDashboard:
         return formatted
 
     def _format_alpha_data(self, data: Dict) -> Dict:
-        """格式化 Alpha 数据为中文友好格式"""
-        grade_map = {
-            "INFERIOR": "较差",
-            "AVERAGE": "一般",
-            "GOOD": "良好",
-            "EXCELLENT": "优秀"
-        }
-
-        status_map = {
-            "UNSUBMITTED": "未提交",
-            "SUBMITTED": "已提交",
-            "CORRELATION": "相关性检查中",
-            "FAIL": "失败"
-        }
-
-        check_result_map = {
-            "PASS": "通过",
-            "FAIL": "未通过",
-            "PENDING": "待检查"
-        }
+        """格式化 Alpha 数据为英文格式（与数据库格式一致）"""
 
         # 格式化检查项
         checks = []
         for check in data.get("is", {}).get("checks", []):
             checks.append({
-                "名称": self._translate_check_name(check.get("name", "")),
-                "结果": check_result_map.get(check.get("result", ""), check.get("result", "")),
-                "限制": check.get("limit", ""),
-                "值": check.get("value", "")
+                "check_name": check.get("name", ""),
+                "result": check.get("result", ""),
+                "limit_value": check.get("limit", ""),
+                "actual_value": check.get("value", "")
             })
 
         formatted = {
             "id": data.get("id", ""),
-            "表达式": data.get("regular", {}).get("code", ""),
-            "描述": data.get("regular", {}).get("description", "无"),
-            "等级": grade_map.get(data.get("grade", ""), data.get("grade", "未知")),
-            "状态": status_map.get(data.get("status", ""), data.get("status", "未知")),
-            "创建时间": data.get("dateCreated", ""),
-            "提交时间": data.get("dateSubmitted", "未提交"),
-            "IS性能": {
-                "夏普比率": data.get("is", {}).get("sharpe", ""),
-                "适应度": data.get("is", {}).get("fitness", ""),
-                "换手率": data.get("is", {}).get("turnover", ""),
-                "收益率": data.get("is", {}).get("returns", ""),
-                "最大回撤": data.get("is", {}).get("drawdown", ""),
-                "多头数量": data.get("is", {}).get("longCount", ""),
-                "空头数量": data.get("is", {}).get("shortCount", ""),
-                "PnL": data.get("is", {}).get("pnl", ""),
-                "本金": data.get("is", {}).get("bookSize", ""),
+            "expression": data.get("regular", {}).get("code", ""),
+            "description": data.get("regular", {}).get("description"),
+            "grade": data.get("grade"),
+            "status": data.get("status", ""),
+            "stage": data.get("stage"),
+            "date_created": data.get("dateCreated", ""),
+            "date_submitted": data.get("dateSubmitted"),
+            "date_modified": data.get("dateModified"),
+            "operator_count": data.get("regular", {}).get("operatorCount"),
+            "settings": {
+                "instrument_type": data.get("settings", {}).get("instrumentType", ""),
+                "region": data.get("settings", {}).get("region", ""),
+                "universe": data.get("settings", {}).get("universe", ""),
+                "delay": data.get("settings", {}).get("delay"),
+                "decay": data.get("settings", {}).get("decay"),
+                "neutralization": data.get("settings", {}).get("neutralization", ""),
+                "truncation": data.get("settings", {}).get("truncation"),
+                "start_date": data.get("settings", {}).get("startDate", ""),
+                "end_date": data.get("settings", {}).get("endDate", ""),
             },
-            "检查项": checks,
-            "设置": {
-                "工具类型": data.get("settings", {}).get("instrumentType", ""),
-                "区域": data.get("settings", {}).get("region", ""),
-                "股票池": data.get("settings", {}).get("universe", ""),
-                "延迟": data.get("settings", {}).get("delay", ""),
-                "衰减": data.get("settings", {}).get("decay", ""),
-                "中性化": data.get("settings", {}).get("neutralization", ""),
-                "截断": data.get("settings", {}).get("truncation", ""),
-                "开始日期": data.get("settings", {}).get("startDate", ""),
-                "结束日期": data.get("settings", {}).get("endDate", ""),
+            "is": {
+                "sharpe": data.get("is", {}).get("sharpe"),
+                "fitness": data.get("is", {}).get("fitness"),
+                "turnover": data.get("is", {}).get("turnover"),
+                "returns": data.get("is", {}).get("returns"),
+                "drawdown": data.get("is", {}).get("drawdown"),
+                "long_count": data.get("is", {}).get("longCount"),
+                "short_count": data.get("is", {}).get("shortCount"),
+                "pnl": data.get("is", {}).get("pnl"),
+                "book_size": data.get("is", {}).get("bookSize"),
             },
-            "分类": [c.get("name", "") for c in data.get("classifications", [])],
-            "标签": data.get("tags", []),
+            "os": {
+                "sharpe": data.get("os", {}).get("sharpe"),
+                "fitness": data.get("os", {}).get("fitness"),
+                "turnover": data.get("os", {}).get("turnover"),
+            },
+            "checks": checks,
+            "classifications": [c.get("name", "") for c in data.get("classifications", [])],
+            "tags": data.get("tags", []),
         }
 
         return formatted
@@ -810,7 +799,7 @@ class AlphaDashboard:
                     "os_checks_pass": a['os_checks_pass'] or 0,
                     "os_checks_fail": a['os_checks_fail'] or 0,
                     # 可提交判断
-                    "is_submittable": (a['is_checks_fail'] or 0) == 0 and a['status'] != 'UNSUBMITTED' if a['status'] else False
+                    "is_submittable": (a['is_checks_fail'] or 0) == 0 and a['status'] == 'UNSUBMITTED' if a['status'] else False
                 })
 
             return result
@@ -883,7 +872,7 @@ class AlphaDashboard:
                 "failed_checks": failed_checks,
                 "competitions": convert_decimal(alpha.get('competitions', [])),
                 "team": convert_decimal(alpha.get('team')),
-                "is_submittable": len(failed_checks) == 0 and alpha['status'] != 'UNSUBMITTED' if alpha['status'] else False
+                "is_submittable": len(failed_checks) == 0 and alpha['status'] == 'UNSUBMITTED' if alpha['status'] else False
             }
 
         except Exception as e:

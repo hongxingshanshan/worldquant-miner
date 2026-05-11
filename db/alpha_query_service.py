@@ -216,3 +216,76 @@ class AlphaQueryService:
                 'by_grade': by_grade,
                 'last_sync_log': last_sync_log
             }
+
+    def get_optimizable_alphas(self, limit: int = 50) -> List[Dict]:
+        """
+        获取可优化的 Alpha 列表（IS 检查通过 6 项，失败 1 项）
+
+        筛选条件：
+        - status = 'UNSUBMITTED'
+        - IS 检查项：6 项 PASS，1 项 FAIL
+        - 未隐藏
+        - 按创建时间倒序排列
+
+        Args:
+            limit: 返回数量上限
+
+        Returns:
+            可优化的 Alpha 列表
+        """
+        sql = """
+            SELECT
+                a.id,
+                a.expression,
+                a.grade,
+                a.status,
+                a.stage,
+                a.date_created,
+                p.sharpe as is_sharpe,
+                p.fitness as is_fitness,
+                p.turnover as is_turnover,
+                p.returns as is_returns,
+                COUNT(CASE WHEN c.result = 'PASS' AND c.stage = 'IS' THEN 1 END) as is_checks_pass,
+                COUNT(CASE WHEN c.result = 'FAIL' AND c.stage = 'IS' THEN 1 END) as is_checks_fail
+            FROM alpha a
+            LEFT JOIN alpha_performance p ON a.id = p.alpha_id AND p.stage = 'IS'
+            LEFT JOIN alpha_checks c ON a.id = c.alpha_id
+            WHERE a.status = 'UNSUBMITTED'
+              AND (a.hidden = FALSE OR a.hidden IS NULL)
+            GROUP BY a.id
+            HAVING is_checks_pass = 6 AND is_checks_fail = 1
+            ORDER BY is_sharpe DESC, a.date_created DESC
+            LIMIT %s
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, (limit,))
+            return cursor.fetchall()
+
+    def get_alpha_checks_detail(self, alpha_id: str) -> List[Dict]:
+        """
+        获取 Alpha 的检查项详情
+
+        Args:
+            alpha_id: Alpha ID
+
+        Returns:
+            检查项列表
+        """
+        sql = """
+            SELECT
+                check_name,
+                stage,
+                result,
+                limit_value,
+                actual_value
+            FROM alpha_checks
+            WHERE alpha_id = %s AND stage = 'IS'
+            ORDER BY check_name
+        """
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, (alpha_id,))
+            return cursor.fetchall()
