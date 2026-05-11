@@ -133,6 +133,51 @@ fnd6_mfma2_oancf, operating_income, est_eps, implied_volatility_call_120, implie
 优化后的表达式：
 """
 
+# 批量优化提示词模板
+BATCH_OPTIMIZATION_PROMPT = """
+请批量优化以下 {count} 个未通过检查的 Alpha 表达式。
+
+## 优化规则
+1. 每个 Alpha 只需要针对性修复失败的检查项
+2. 保持 Alpha 的核心逻辑，只做最小改动
+3. 确保优化后的表达式包含外层 rank/ts_rank/group_rank（通过 CONCENTRATED_WEIGHT 检查的关键）
+4. 输出格式必须严格遵循要求
+
+## 常见失败检查项修复方法
+
+### LOW_SUB_UNIVERSE_SHARPE（子宇宙夏普值低）
+- 行业中性化：group_neutralize(expr, industry)
+- 板块中性化：group_neutralize(expr, sector)
+- 市值标准化：divide(expr, cap)
+
+### CONCENTRATED_WEIGHT（权重集中）
+- 添加外层排名：rank(expr), ts_rank(expr, 20)
+- 行业中性化：group_neutralize(expr, industry)
+
+### HIGH_TURNOVER（换手率过高）
+- 时间平滑：ts_decay_linear(expr, 5), ts_mean(expr, 10)
+- 降低频率：ts_delay(expr, 1)
+
+### LOW_FITNESS（适应度低）
+- 信号增强：scale(expr), normalize(expr)
+- 时间平滑：ts_decay_linear(expr, 5)
+
+## Alpha 列表
+
+{alpha_list}
+
+## 输出格式要求
+严格按照以下格式输出，每个 Alpha 一行，格式为：
+[序号]|[优化后的表达式]
+
+示例输出：
+1|rank(ts_zscore(divide(fnd6_oiadps, cap), 60))
+2|group_neutralize(ts_rank(divide(fnd6_newqv1300_tfvaq, cap), 60), industry)
+3|ts_rank(divide(operating_income, cap), 40)
+
+请输出优化后的表达式：
+"""
+
 
 class AlphaOptimizer:
     """Alpha 优化器"""
@@ -479,8 +524,158 @@ class AlphaOptimizer:
                 "timestamp": datetime.now().isoformat()
             }
 
+    def optimize_batch(self, alphas: List[Dict], temperature: float = 0.5) -> List[Dict]:
+        """
+        批量优化多个 Alpha（一次 LLM 调用）
+
+        Args:
+            alphas: Alpha 数据列表
+            temperature: LLM 温度参数
+
+        Returns:
+            优化结果列表
+        """
+        if not alphas:
+            return []
+
+        self.optimization_stats["total_attempts"] += len(alphas)
+
+        # 构建批量提示词
+        alpha_list = []
+        for i, alpha in enumerate(alphas, 1):
+            expr = alpha.get("expression", "")
+            sharpe = alpha.get("sharpe", 0) or 0
+            fitness = alpha.get("fitness", 0) or 0
+            turnover = alpha.get("turnover", 0) or 0
+            failed_checks = alpha.get("failed_checks", [])
+
+            alpha_list.append(f"""
+### Alpha {i}
+- 表达式: {expr}
+- Sharpe: {sharpe:.2f}
+- Fitness: {fitness:.2f}
+- Turnover: {turnover:.4f}
+- 失败检查项: {', '.join(failed_checks) if failed_checks else '未知'}
+""")
+
+        prompt = BATCH_OPTIMIZATION_PROMPT.format(
+            count=len(alphas),
+            alpha_list="\n".join(alpha_list)
+        )
+
+        try:
+            logger.info(f"批量优化 {len(alphas)} 个 Alpha（单次 LLM 调用）")
+
+            # 调用 LLM
+            response = self.llm_client.generate(
+                system_prompt=OPTIMIZATION_SYSTEM_PROMPT,
+                prompt=prompt,
+                temperature=temperature
+            )
+
+            # 解析批量结果
+            results = self._parse_batch_results(response, alphas)
+
+            # 更新统计
+            self.optimization_stats["successful"] += len(results)
+            self.optimization_stats["failed"] += len(alphas) - len(results)
+
+            logger.info(f"批量优化完成: 成功 {len(results)}/{len(alphas)}")
+
+            return results
+
+        except Exception as e:
+            self.optimization_stats["failed"] += len(alphas)
+            logger.error(f"批量优化失败: {e}")
+            return []
+
+    def _parse_batch_results(self, response: str, original_alphas: List[Dict]) -> List[Dict]:
+        """
+        解析批量优化结果
+
+        Args:
+            response: LLM 响应文本
+            original_alphas: 原始 Alpha 列表
+
+        Returns:
+            优化结果列表
+        """
+        results = []
+        lines = response.strip().split("\n")
+
+        for line in lines:
+            line = line.strip()
+            if not line or "|" not in line:
+                continue
+
+            try:
+                # 解析格式: [序号]|[表达式]
+                parts = line.split("|", 1)
+                if len(parts) != 2:
+                    continue
+
+                idx = int(parts[0].strip()) - 1  # 转为 0-based 索引
+                optimized_expr = parts[1].strip()
+
+                if idx < 0 or idx >= len(original_alphas):
+                    continue
+
+                original = original_alphas[idx]
+
+                # 验证表达式
+                if self._validate_expression(optimized_expr):
+                    result = {
+                        "success": True,
+                        "original": original.get("expression"),
+                        "optimized": optimized_expr,
+                        "alpha_id": original.get("id"),
+                        "original_metrics": {
+                            "sharpe": original.get("sharpe"),
+                            "fitness": original.get("fitness"),
+                            "turnover": original.get("turnover")
+                        },
+                        "failure_type": original.get("failed_checks", ["UNKNOWN"])[0] if original.get("failed_checks") else "UNKNOWN",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    results.append(result)
+                    self.optimization_history.append(result)
+
+                    logger.info(
+                        f"优化成功 [{idx+1}]: {original.get('expression', '')[:30]}... → {optimized_expr[:30]}..."
+                    )
+
+            except Exception as e:
+                logger.warning(f"解析行失败: {line}, 错误: {e}")
+                continue
+
+        return results
+
+    def _validate_expression(self, expr: str) -> bool:
+        """
+        验证 Alpha 表达式基本有效性
+
+        Args:
+            expr: 表达式字符串
+
+        Returns:
+            是否有效
+        """
+        if not expr or len(expr) < 5:
+            return False
+
+        # 检查括号匹配
+        if expr.count("(") != expr.count(")"):
+            return False
+
+        # 检查是否包含外层排名操作符
+        outer_operators = ["rank(", "ts_rank(", "group_rank("]
+        has_outer_rank = any(expr.strip().startswith(op) for op in outer_operators)
+
+        return has_outer_rank
+
     def optimize_top_failed(self, top_n: int = 5, min_sharpe: float = 1.0,
-                           temperature: float = 0.5, use_db: bool = False) -> List[Dict]:
+                           temperature: float = 0.5, use_db: bool = False,
+                           batch_mode: bool = True) -> List[Dict]:
         """
         优化前 N 个失败的 Alpha
 
@@ -489,6 +684,7 @@ class AlphaOptimizer:
             min_sharpe: 最低 Sharpe 阈值（仅 API 模式使用）
             temperature: LLM 温度参数
             use_db: 是否从数据库获取优化候选（IS 检查 6 PASS, 1 FAIL）
+            batch_mode: 是否使用批量优化模式（默认 True，一次 LLM 调用优化所有 Alpha）
 
         Returns:
             优化结果列表
@@ -507,15 +703,21 @@ class AlphaOptimizer:
             logger.info("没有符合条件的失败 Alpha 需要优化")
             return []
 
-        results = []
-        for i, alpha_data in enumerate(failed_alphas, 1):
-            logger.info(f"优化进度: {i}/{len(failed_alphas)}")
-            try:
-                result = self.optimize_alpha(alpha_data, temperature)
-                if result.get("success") and result.get("optimized"):
-                    results.append(result)
-            except Exception as e:
-                logger.error(f"优化第 {i} 个 Alpha 失败: {e}")
+        # 选择优化模式
+        if batch_mode and len(failed_alphas) > 1:
+            logger.info(f"批量优化模式: 一次性优化 {len(failed_alphas)} 个 Alpha")
+            results = self.optimize_batch(failed_alphas, temperature)
+        else:
+            logger.info(f"逐个优化模式: 优化 {len(failed_alphas)} 个 Alpha")
+            results = []
+            for i, alpha_data in enumerate(failed_alphas, 1):
+                logger.info(f"优化进度: {i}/{len(failed_alphas)}")
+                try:
+                    result = self.optimize_alpha(alpha_data, temperature)
+                    if result.get("success") and result.get("optimized"):
+                        results.append(result)
+                except Exception as e:
+                    logger.error(f"优化第 {i} 个 Alpha 失败: {e}")
 
         logger.info(f"优化完成: 成功 {len(results)}/{len(failed_alphas)}")
         return results
