@@ -15,6 +15,18 @@ import atexit
 import psutil
 from requests.auth import HTTPBasicAuth
 
+# 添加项目根目录到路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+# 导入数据库服务
+try:
+    from db.alpha_query_service import AlphaQueryService
+    from db.alpha_sync_service import AlphaSyncService
+    DB_AVAILABLE = True
+except ImportError as e:
+    print(f"数据库服务导入失败: {e}")
+    DB_AVAILABLE = False
+
 app = Flask(__name__)
 
 # Web Dashboard 不写入日志，只读取日志进行监控
@@ -34,6 +46,25 @@ class AlphaDashboard:
         self.credentials_path = "credential.txt"
         self.sess = None  # WorldQuant API session
         self.optimizer = None  # 延迟初始化
+
+        # 数据库服务
+        self.query_service = None
+        self._init_db_service()
+
+    def _init_db_service(self):
+        """初始化数据库查询服务"""
+        if not DB_AVAILABLE:
+            return
+
+        db_config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'db', 'db_config.json')
+        if os.path.exists(db_config_file):
+            try:
+                with open(db_config_file, 'r', encoding='utf-8') as f:
+                    db_config = json.load(f)
+                self.query_service = AlphaQueryService(db_config)
+                logger.info("数据库查询服务初始化成功")
+            except Exception as e:
+                logger.warning(f"数据库查询服务初始化失败: {e}")
 
     def _load_config(self) -> Dict:
         """加载配置文件"""
@@ -731,6 +762,192 @@ class AlphaDashboard:
 
         return result
 
+    # ==================== 数据库相关方法 ====================
+
+    def get_alphas_from_db(self, limit: int = 50, order_by: str = 'is_checks_pass',
+                           status_filter: str = None, stage_filter: str = None) -> List[Dict]:
+        """从数据库获取 Alpha 列表"""
+        if not self.query_service:
+            return []
+
+        try:
+            alphas = self.query_service.get_alpha_list(
+                limit=limit,
+                order_by=order_by,
+                status_filter=status_filter,
+                stage_filter=stage_filter
+            )
+
+            # 格式化返回
+            result = []
+            for a in alphas:
+                result.append({
+                    "id": a['id'],
+                    "expression": a['expression'],
+                    "description": a['description'],
+                    "grade": a['grade'],
+                    "status": a['status'],
+                    "stage": a['stage'],
+                    "is_submitted": a['status'] != 'UNSUBMITTED' if a['status'] else False,
+                    "date_created": str(a['date_created']) if a['date_created'] else None,
+                    "date_submitted": str(a['date_submitted']) if a['date_submitted'] else None,
+                    "date_modified": str(a['date_modified']) if a['date_modified'] else None,
+                    "synced_at": str(a['synced_at']) if a['synced_at'] else None,
+                    "operator_count": a['operator_count'],
+                    # IS 指标
+                    "is_sharpe": float(a['is_sharpe']) if a['is_sharpe'] else None,
+                    "is_fitness": float(a['is_fitness']) if a['is_fitness'] else None,
+                    "is_turnover": float(a['is_turnover']) if a['is_turnover'] else None,
+                    "is_returns": float(a['is_returns']) if a['is_returns'] else None,
+                    "is_drawdown": float(a['is_drawdown']) if a['is_drawdown'] else None,
+                    # OS 指标
+                    "os_sharpe": float(a['os_sharpe']) if a['os_sharpe'] else None,
+                    "os_fitness": float(a['os_fitness']) if a['os_fitness'] else None,
+                    "os_turnover": float(a['os_turnover']) if a['os_turnover'] else None,
+                    # 检查结果统计
+                    "is_checks_pass": a['is_checks_pass'] or 0,
+                    "is_checks_fail": a['is_checks_fail'] or 0,
+                    "os_checks_pass": a['os_checks_pass'] or 0,
+                    "os_checks_fail": a['os_checks_fail'] or 0,
+                    # 可提交判断
+                    "is_submittable": (a['is_checks_fail'] or 0) == 0 and a['status'] != 'UNSUBMITTED' if a['status'] else False
+                })
+
+            return result
+        except Exception as e:
+            logger.error(f"从数据库获取 Alpha 列表失败: {e}")
+            return []
+
+    def get_alpha_detail_from_db(self, alpha_id: str) -> Dict:
+        """从数据库获取 Alpha 详情"""
+        result = {
+            "success": False,
+            "data": None,
+            "error": None
+        }
+
+        if not self.query_service:
+            result["error"] = "数据库服务不可用"
+            return result
+
+        try:
+            alpha = self.query_service.get_alpha_detail(alpha_id)
+
+            if not alpha:
+                result["error"] = f"Alpha 不存在: {alpha_id}"
+                return result
+
+            # 格式化检查结果
+            failed_checks = [c['check_name'] for c in alpha['checks'] if c['result'] == 'FAIL']
+
+            # 转换 datetime 为字符串
+            def dt_to_str(dt):
+                return str(dt) if dt else None
+
+            result["success"] = True
+            result["data"] = {
+                "id": alpha['id'],
+                "expression": alpha['expression'],
+                "description": alpha['description'],
+                "grade": alpha['grade'],
+                "status": alpha['status'],
+                "stage": alpha['stage'],
+                "date_created": dt_to_str(alpha['date_created']),
+                "date_submitted": dt_to_str(alpha['date_submitted']),
+                "date_modified": dt_to_str(alpha['date_modified']),
+                "synced_at": dt_to_str(alpha['synced_at']),
+                "operator_count": alpha['operator_count'],
+                "settings": alpha['settings'],
+                "is": alpha['performances'].get('IS'),
+                "os": alpha['performances'].get('OS'),
+                "train": alpha['performances'].get('TRAIN'),
+                "test": alpha['performances'].get('TEST'),
+                "prod": alpha['performances'].get('PROD'),
+                "checks": alpha['checks'],
+                "failed_checks": failed_checks,
+                "competitions": alpha.get('competitions', []),
+                "team": alpha.get('team'),
+                "is_submittable": len(failed_checks) == 0 and alpha['status'] != 'UNSUBMITTED' if alpha['status'] else False
+            }
+
+        except Exception as e:
+            logger.error(f"从数据库获取 Alpha 详情失败: {e}")
+            result["error"] = str(e)
+
+        return result
+
+    def sync_incremental(self) -> Dict:
+        """触发增量同步"""
+        result = {
+            "success": False,
+            "stats": None,
+            "error": None
+        }
+
+        try:
+            # 获取数据库配置
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            db_config_file = os.path.join(project_root, 'db', 'db_config.json')
+            credentials_path = os.path.join(project_root, 'credential.txt')
+
+            with open(db_config_file, 'r', encoding='utf-8') as f:
+                db_config = json.load(f)
+
+            sync_service = AlphaSyncService(credentials_path, db_config)
+            stats = sync_service.sync_incremental(batch_size=50)
+
+            result["success"] = True
+            result["stats"] = stats
+
+        except Exception as e:
+            logger.error(f"增量同步失败: {e}")
+            result["error"] = str(e)
+
+        return result
+
+    def sync_full(self) -> Dict:
+        """触发全量同步"""
+        result = {
+            "success": False,
+            "stats": None,
+            "error": None
+        }
+
+        try:
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            db_config_file = os.path.join(project_root, 'db', 'db_config.json')
+            credentials_path = os.path.join(project_root, 'credential.txt')
+
+            with open(db_config_file, 'r', encoding='utf-8') as f:
+                db_config = json.load(f)
+
+            sync_service = AlphaSyncService(credentials_path, db_config)
+            stats = sync_service.sync_all(batch_size=50)
+
+            result["success"] = True
+            result["stats"] = stats
+
+        except Exception as e:
+            logger.error(f"全量同步失败: {e}")
+            result["error"] = str(e)
+
+        return result
+
+    def get_sync_status(self) -> Dict:
+        """获取同步状态"""
+        if not self.query_service:
+            return {"error": "数据库服务不可用"}
+
+        try:
+            return {
+                "last_sync_time": str(self.query_service.get_last_sync_time()) if self.query_service.get_last_sync_time() else None,
+                "last_created_time": str(self.query_service.get_last_created_time()) if self.query_service.get_last_created_time() else None,
+                "total_alphas": self.query_service.get_alpha_count(),
+                "statistics": self.query_service.get_statistics()
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
 # Global dashboard instance
 dashboard = AlphaDashboard()
 
@@ -786,7 +1003,13 @@ def api_simulation_status(sim_id):
 
 @app.route('/api/alpha/<alpha_id>')
 def api_alpha_details(alpha_id):
-    """API endpoint to get alpha details."""
+    """API endpoint to get alpha details (优先从数据库获取)."""
+    # 优先从数据库获取
+    if dashboard.query_service:
+        result = dashboard.get_alpha_detail_from_db(alpha_id)
+        if result.get("success"):
+            return jsonify(result)
+    # 数据库获取失败，回退到 API
     return jsonify(dashboard.get_alpha_details(alpha_id))
 
 @app.route('/api/optimize-alpha/<alpha_id>', methods=['POST'])
@@ -796,9 +1019,48 @@ def api_optimize_alpha(alpha_id):
 
 @app.route('/api/failed-alphas')
 def api_failed_alphas():
-    """API endpoint to get failed alphas list."""
+    """API endpoint to get failed alphas list (从 API 获取)."""
     limit = request.args.get('limit', 20, type=int)
     return jsonify({"alphas": dashboard.get_failed_alphas(limit)})
+
+# ==================== 数据库相关 API ====================
+
+@app.route('/api/alphas')
+def api_alphas():
+    """API endpoint to get alpha list from database."""
+    limit = request.args.get('limit', 50, type=int)
+    order_by = request.args.get('order', 'is_checks_pass')
+    status = request.args.get('status')
+    stage = request.args.get('stage')
+
+    alphas = dashboard.get_alphas_from_db(
+        limit=limit,
+        order_by=order_by,
+        status_filter=status,
+        stage_filter=stage
+    )
+
+    return jsonify({"alphas": alphas, "total": len(alphas)})
+
+@app.route('/api/alpha-db/<alpha_id>')
+def api_alpha_detail_db(alpha_id):
+    """API endpoint to get alpha detail from database."""
+    return jsonify(dashboard.get_alpha_detail_from_db(alpha_id))
+
+@app.route('/api/sync', methods=['POST'])
+def api_sync():
+    """API endpoint to trigger incremental sync."""
+    return jsonify(dashboard.sync_incremental())
+
+@app.route('/api/sync/full', methods=['POST'])
+def api_sync_full():
+    """API endpoint to trigger full sync."""
+    return jsonify(dashboard.sync_full())
+
+@app.route('/api/sync/status')
+def api_sync_status():
+    """API endpoint to get sync status."""
+    return jsonify(dashboard.get_sync_status())
 
 def setup_cleanup_handler():
     """设置 Windows 控制台关闭事件处理器"""

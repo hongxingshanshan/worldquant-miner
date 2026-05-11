@@ -195,9 +195,6 @@ class AlphaSyncService:
                         # 统一为 naive datetime 比较
                         if hasattr(alpha_date_created, 'tzinfo') and alpha_date_created.tzinfo is not None:
                             alpha_date_created = alpha_date_created.replace(tzinfo=None)
-                        if alpha_date_created <= since:
-                            self.stats['skipped'] += 1
-                            continue
 
                     # 检查是否已存在
                     existing = self.db.query_one(
