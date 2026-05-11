@@ -819,7 +819,7 @@ class AlphaDashboard:
             return []
 
     def get_alpha_detail_from_db(self, alpha_id: str) -> Dict:
-        """从数据库获取 Alpha 详情"""
+        """从数据库获取 Alpha 详情（返回与 API 格式一致的中文格式）"""
         from decimal import Decimal
 
         result = {
@@ -839,14 +839,7 @@ class AlphaDashboard:
                 result["error"] = f"Alpha 不存在: {alpha_id}"
                 return result
 
-            # 格式化检查结果
-            failed_checks = [c['check_name'] for c in alpha['checks'] if c['result'] == 'FAIL']
-
-            # 转换 datetime 为字符串
-            def dt_to_str(dt):
-                return str(dt) if dt else None
-
-            # 转换 Decimal 为 float（用于 JSON 序列化）
+            # 转换 Decimal 为 float
             def convert_decimal(obj):
                 if isinstance(obj, Decimal):
                     return float(obj)
@@ -856,38 +849,80 @@ class AlphaDashboard:
                     return [convert_decimal(item) for item in obj]
                 return obj
 
-            # 转换性能指标中的 Decimal
-            performances = alpha['performances']
-            is_perf = convert_decimal(performances.get('IS'))
-            os_perf = convert_decimal(performances.get('OS'))
-            train_perf = convert_decimal(performances.get('TRAIN'))
-            test_perf = convert_decimal(performances.get('TEST'))
-            prod_perf = convert_decimal(performances.get('PROD'))
+            # 获取性能指标
+            is_perf = convert_decimal(alpha['performances'].get('IS', {}))
+
+            # 格式化为中文格式（与 _format_alpha_data 一致）
+            grade_map = {
+                "INFERIOR": "较差",
+                "AVERAGE": "一般",
+                "GOOD": "良好",
+                "EXCELLENT": "优秀"
+            }
+
+            status_map = {
+                "UNSUBMITTED": "未提交",
+                "SUBMITTED": "已提交",
+                "CORRELATION": "相关性检查中",
+                "FAIL": "失败",
+                "ACTIVE": "活跃"
+            }
+
+            check_result_map = {
+                "PASS": "通过",
+                "FAIL": "未通过",
+                "PENDING": "待检查",
+                "ERROR": "错误"
+            }
+
+            # 格式化检查项
+            checks = []
+            for check in alpha.get('checks', []):
+                if check.get('stage') == 'IS':
+                    checks.append({
+                        "名称": self._translate_check_name(check.get('check_name', '')),
+                        "结果": check_result_map.get(check.get('result', ''), check.get('result', '')),
+                        "限制": check.get('limit_value', ''),
+                        "值": check.get('actual_value', '')
+                    })
+
+            # 获取设置
+            settings = alpha.get('settings') or {}
 
             result["success"] = True
             result["data"] = {
                 "id": alpha['id'],
-                "expression": alpha['expression'],
-                "description": alpha['description'],
-                "grade": alpha['grade'],
-                "status": alpha['status'],
-                "stage": alpha['stage'],
-                "date_created": dt_to_str(alpha['date_created']),
-                "date_submitted": dt_to_str(alpha['date_submitted']),
-                "date_modified": dt_to_str(alpha['date_modified']),
-                "synced_at": dt_to_str(alpha['synced_at']),
-                "operator_count": alpha['operator_count'],
-                "settings": convert_decimal(alpha['settings']),
-                "is": is_perf,
-                "os": os_perf,
-                "train": train_perf,
-                "test": test_perf,
-                "prod": prod_perf,
-                "checks": convert_decimal(alpha['checks']),
-                "failed_checks": failed_checks,
-                "competitions": convert_decimal(alpha.get('competitions', [])),
-                "team": convert_decimal(alpha.get('team')),
-                "is_submittable": len(failed_checks) == 0 and alpha['status'] != 'UNSUBMITTED' if alpha['status'] else False
+                "表达式": alpha.get('expression', ''),
+                "描述": alpha.get('description', '无'),
+                "等级": grade_map.get(alpha.get('grade', ''), alpha.get('grade', '未知')),
+                "状态": status_map.get(alpha.get('status', ''), alpha.get('status', '未知')),
+                "创建时间": str(alpha['date_created']) if alpha.get('date_created') else '',
+                "提交时间": str(alpha['date_submitted']) if alpha.get('date_submitted') else '未提交',
+                "IS性能": {
+                    "夏普比率": is_perf.get('sharpe', ''),
+                    "适应度": is_perf.get('fitness', ''),
+                    "换手率": is_perf.get('turnover', ''),
+                    "收益率": is_perf.get('returns', ''),
+                    "最大回撤": is_perf.get('drawdown', ''),
+                    "多头数量": is_perf.get('long_count', ''),
+                    "空头数量": is_perf.get('short_count', ''),
+                    "PnL": is_perf.get('pnl', ''),
+                    "本金": is_perf.get('book_size', ''),
+                },
+                "检查项": checks,
+                "设置": {
+                    "工具类型": settings.get('instrument_type', ''),
+                    "区域": settings.get('region', ''),
+                    "股票池": settings.get('universe', ''),
+                    "延迟": settings.get('delay', ''),
+                    "衰减": settings.get('decay', ''),
+                    "中性化": settings.get('neutralization', ''),
+                    "截断": settings.get('truncation', ''),
+                    "开始日期": str(settings.get('start_date', '')) if settings.get('start_date') else '',
+                    "结束日期": str(settings.get('end_date', '')) if settings.get('end_date') else '',
+                },
+                "分类": [c.get('classification_name', '') for c in alpha.get('classifications', [])],
+                "标签": [],
             }
 
         except Exception as e:
