@@ -762,6 +762,51 @@ class AlphaDashboard:
 
         return result
 
+    def submit_alpha_by_id(self, alpha_id: str) -> Dict:
+        """提交 Alpha 到 WorldQuant Brain"""
+        result = {
+            "success": False,
+            "alpha_id": alpha_id,
+            "status": None,
+            "message": None,
+            "error": None
+        }
+
+        try:
+            sess = self._get_wq_session()
+            if sess is None:
+                result["error"] = "无法连接到 WorldQuant Brain API"
+                return result
+
+            # 调用提交 API
+            url = f"https://api.worldquantbrain.com/alphas/{alpha_id}/submit"
+            response = sess.post(url, timeout=30)
+
+            if response.status_code == 201:
+                result["success"] = True
+                result["status"] = "SUBMITTED"
+                result["message"] = "提交成功"
+            elif response.status_code == 409:
+                result["success"] = True
+                result["status"] = "ALREADY_SUBMITTED"
+                result["message"] = "已提交过"
+            else:
+                result["error"] = f"提交失败: HTTP {response.status_code}"
+                try:
+                    error_data = response.json()
+                    if error_data.get("message"):
+                        result["error"] = f"提交失败: {error_data['message']}"
+                except:
+                    pass
+
+        except requests.exceptions.Timeout:
+            result["error"] = "请求超时"
+        except Exception as e:
+            logger.error(f"提交 Alpha {alpha_id} 失败: {e}")
+            result["error"] = str(e)
+
+        return result
+
     # ==================== 数据库相关方法 ====================
 
     def get_alphas_from_db(self, limit: int = 50, order_by: str = 'is_checks_pass',
@@ -1032,6 +1077,11 @@ def api_alpha_details(alpha_id):
 def api_optimize_alpha(alpha_id):
     """API endpoint to optimize alpha by ID."""
     return jsonify(dashboard.optimize_alpha_by_id(alpha_id))
+
+@app.route('/api/submit-alpha/<alpha_id>', methods=['POST'])
+def api_submit_alpha(alpha_id):
+    """API endpoint to submit alpha to WorldQuant Brain."""
+    return jsonify(dashboard.submit_alpha_by_id(alpha_id))
 
 @app.route('/api/failed-alphas')
 def api_failed_alphas():

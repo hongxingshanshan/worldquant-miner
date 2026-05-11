@@ -692,6 +692,21 @@
                     ? '<span class="label label-success">可提交</span>'
                     : '<span class="label label-danger">不可提交</span>';
 
+                // 构建操作按钮
+                let actionButtons = `
+                    <button class="action-btn btn-primary" onclick="showDetail('${alpha.id}')">详情</button>
+                    <button class="action-btn btn-warning" onclick="optimizeAlpha('${alpha.id}')">优化</button>
+                `;
+
+                // 如果可提交，添加提交按钮
+                if (alpha.is_submittable) {
+                    actionButtons = `
+                        <button class="action-btn btn-primary" onclick="showDetail('${alpha.id}')">详情</button>
+                        <button class="action-btn btn-success" onclick="submitAlpha('${alpha.id}')">提交</button>
+                        <button class="action-btn btn-warning" onclick="optimizeAlpha('${alpha.id}')">优化</button>
+                    `;
+                }
+
                 row.innerHTML = `
                     <td><a class="alpha-id-link" onclick="showDetail('${alpha.id}')">${alpha.id}</a></td>
                     <td><div class="alpha-expr" title="${escapeHtml(alpha.expression || '')}">${escapeHtml((alpha.expression || '').substring(0, 40))}${(alpha.expression || '').length > 40 ? '...' : ''}</div></td>
@@ -706,10 +721,7 @@
                     <td class="checks-cell">${osChecksHtml}</td>
                     <td>${submittableLabel}</td>
                     <td>${formatDateTime(alpha.date_created)}</td>
-                    <td>
-                        <button class="action-btn btn-primary" onclick="showDetail('${alpha.id}')">详情</button>
-                        <button class="action-btn btn-warning" onclick="optimizeAlpha('${alpha.id}')">优化</button>
-                    </td>
+                    <td>${actionButtons}</td>
                 `;
 
                 tbody.appendChild(row);
@@ -930,6 +942,27 @@
                 }
             } catch (error) {
                 alert('优化失败: ' + error);
+            }
+        }
+
+        // 提交 Alpha
+        async function submitAlpha(alphaId) {
+            if (!confirm(`确定要提交 Alpha ${alphaId} 到 WorldQuant Brain 吗？`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/submit-alpha/${alphaId}`, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(`提交成功!\n${result.message || alphaId}`);
+                    refreshAlphaList(); // 刷新列表
+                } else {
+                    alert('提交失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('提交失败: ' + error);
             }
         }
 
