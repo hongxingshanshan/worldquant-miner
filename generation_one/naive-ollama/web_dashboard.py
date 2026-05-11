@@ -501,8 +501,12 @@ class AlphaDashboard:
 
             if response.status_code == 200:
                 data = response.json()
-                result["success"] = True
-                result["data"] = self._format_alpha_data(data)
+                formatted_data = self._format_alpha_data(data)
+                if formatted_data:
+                    result["success"] = True
+                    result["data"] = formatted_data
+                else:
+                    result["error"] = "数据格式化失败"
             elif response.status_code == 404:
                 result["error"] = f"Alpha 不存在: {alpha_id}"
             else:
@@ -510,6 +514,7 @@ class AlphaDashboard:
         except requests.exceptions.Timeout:
             result["error"] = "请求超时"
         except Exception as e:
+            logger.error(f"获取 Alpha 详情失败: {e}")
             result["error"] = f"查询失败: {str(e)}"
 
         return result

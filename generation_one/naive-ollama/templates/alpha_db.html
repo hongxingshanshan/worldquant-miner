@@ -494,11 +494,8 @@
 
         <!-- 同步区域 -->
         <div class="sync-section">
-            <button id="syncBtn" class="btn btn-primary" onclick="syncIncremental()">
-                <span>🔄</span> 增量同步
-            </button>
             <button id="syncFullBtn" class="btn btn-secondary" onclick="syncFull()">
-                全量同步
+                同步
             </button>
             <div class="sync-info">
                 <span>📦 总数: <strong id="alphaCount">-</strong></span>
@@ -741,7 +738,12 @@
                 const result = await response.json();
 
                 if (!result.success) {
-                    document.getElementById('modalBody').innerHTML = `<div class="empty-list">${result.error}</div>`;
+                    document.getElementById('modalBody').innerHTML = `<div class="empty-list">${result.error || '查询失败'}</div>`;
+                    return;
+                }
+
+                if (!result.data) {
+                    document.getElementById('modalBody').innerHTML = `<div class="empty-list">未找到 Alpha 数据</div>`;
                     return;
                 }
 
