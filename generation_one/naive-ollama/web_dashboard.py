@@ -820,6 +820,8 @@ class AlphaDashboard:
 
     def get_alpha_detail_from_db(self, alpha_id: str) -> Dict:
         """从数据库获取 Alpha 详情"""
+        from decimal import Decimal
+
         result = {
             "success": False,
             "data": None,
@@ -844,6 +846,24 @@ class AlphaDashboard:
             def dt_to_str(dt):
                 return str(dt) if dt else None
 
+            # 转换 Decimal 为 float（用于 JSON 序列化）
+            def convert_decimal(obj):
+                if isinstance(obj, Decimal):
+                    return float(obj)
+                elif isinstance(obj, dict):
+                    return {k: convert_decimal(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_decimal(item) for item in obj]
+                return obj
+
+            # 转换性能指标中的 Decimal
+            performances = alpha['performances']
+            is_perf = convert_decimal(performances.get('IS'))
+            os_perf = convert_decimal(performances.get('OS'))
+            train_perf = convert_decimal(performances.get('TRAIN'))
+            test_perf = convert_decimal(performances.get('TEST'))
+            prod_perf = convert_decimal(performances.get('PROD'))
+
             result["success"] = True
             result["data"] = {
                 "id": alpha['id'],
@@ -857,16 +877,16 @@ class AlphaDashboard:
                 "date_modified": dt_to_str(alpha['date_modified']),
                 "synced_at": dt_to_str(alpha['synced_at']),
                 "operator_count": alpha['operator_count'],
-                "settings": alpha['settings'],
-                "is": alpha['performances'].get('IS'),
-                "os": alpha['performances'].get('OS'),
-                "train": alpha['performances'].get('TRAIN'),
-                "test": alpha['performances'].get('TEST'),
-                "prod": alpha['performances'].get('PROD'),
-                "checks": alpha['checks'],
+                "settings": convert_decimal(alpha['settings']),
+                "is": is_perf,
+                "os": os_perf,
+                "train": train_perf,
+                "test": test_perf,
+                "prod": prod_perf,
+                "checks": convert_decimal(alpha['checks']),
                 "failed_checks": failed_checks,
-                "competitions": alpha.get('competitions', []),
-                "team": alpha.get('team'),
+                "competitions": convert_decimal(alpha.get('competitions', [])),
+                "team": convert_decimal(alpha.get('team')),
                 "is_submittable": len(failed_checks) == 0 and alpha['status'] != 'UNSUBMITTED' if alpha['status'] else False
             }
 
