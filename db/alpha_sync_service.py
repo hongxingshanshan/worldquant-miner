@@ -6,12 +6,15 @@ Alpha 数据同步服务
 import requests
 from requests.auth import HTTPBasicAuth
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import json
 import os
 import logging
 
 from .db_connector import MySQLConnector
+
+# 中国时区 UTC+8
+CN_TIMEZONE = timezone(timedelta(hours=8))
 
 # 使用统一日志配置
 try:
@@ -427,13 +430,23 @@ class AlphaSyncService:
 
     @staticmethod
     def _parse_datetime(dt_str: str) -> Optional[datetime]:
-        """解析日期时间字符串"""
+        """解析日期时间字符串并转换为中国时区"""
         if not dt_str:
             return None
         try:
             # ISO 8601 格式: 2026-05-09T05:17:34-04:00
             from dateutil import parser
-            return parser.parse(dt_str)
+            dt = parser.parse(dt_str)
+
+            # 如果有时间区信息，转换为中国时区（UTC+8）
+            if dt.tzinfo is not None:
+                # 转换为 UTC，再转换为中国时区
+                dt_utc = dt.astimezone(timezone.utc)
+                dt_cn = dt_utc.astimezone(CN_TIMEZONE)
+                # 返回 naive datetime（不带时区信息），但时间已转换为中国时区
+                return dt_cn.replace(tzinfo=None)
+
+            return dt
         except:
             # 简单格式解析
             try:
