@@ -118,6 +118,79 @@
             border-color: #667eea;
         }
 
+        .date-input {
+            padding: 6px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .date-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        /* 分页区域 */
+        .pagination-section {
+            padding: 15px 20px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .pagination-buttons {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .page-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .page-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .page-numbers {
+            display: flex;
+            gap: 4px;
+        }
+            min-width: 150px;
+        }
+
+        .filter-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
         /* 按钮 */
         .btn {
             padding: 8px 16px;
@@ -543,8 +616,27 @@
                     <option value="500">500</option>
                 </select>
             </div>
-            <button class="btn btn-success" onclick="refreshAlphaList()">
-                <span>🔍</span> 刷新
+        </div>
+
+        <!-- 筛选区域第二行 -->
+        <div class="filter-section" style="margin-top: -10px;">
+            <div class="filter-group">
+                <label>创建时间：</label>
+                <input type="date" id="dateFrom" class="date-input">
+                <span>至</span>
+                <input type="date" id="dateTo" class="date-input">
+            </div>
+            <div class="filter-group">
+                <label>
+                    <input type="checkbox" id="submittableFilter" onchange="applyFilters()">
+                    仅显示可提交
+                </label>
+            </div>
+            <button class="btn btn-primary" onclick="applyFilters()">
+                <span>🔍</span> 筛选
+            </button>
+            <button class="btn btn-secondary" onclick="resetFilters()">
+                <span>↻</span> 重置
             </button>
         </div>
 
@@ -580,6 +672,21 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+            <!-- 分页区域 -->
+            <div class="pagination-section" id="paginationSection">
+                <div class="pagination-info">
+                    共 <span id="totalCount">0</span> 条，
+                    第 <span id="currentPage">1</span> / <span id="totalPages">1</span> 页
+                </div>
+                <div class="pagination-buttons">
+                    <button class="page-btn" onclick="goToPage(1)" id="firstPageBtn">首页</button>
+                    <button class="page-btn" onclick="goToPage(currentPage - 1)" id="prevPageBtn">上一页</button>
+                    <span class="page-numbers" id="pageNumbers"></span>
+                    <button class="page-btn" onclick="goToPage(currentPage + 1)" id="nextPageBtn">下一页</button>
+                    <button class="page-btn" onclick="goToPage(totalPages)" id="lastPageBtn">末页</button>
+                </div>
             </div>
         </div>
     </div>
@@ -618,6 +725,11 @@
             }
         }
 
+        // 全局分页状态
+        let currentPage = 1;
+        let totalPages = 1;
+        let pageSize = 20;
+
         // 刷新 Alpha 列表
         async function refreshAlphaList() {
             const tbody = document.getElementById('alphaTableBody');
@@ -625,31 +737,95 @@
 
             const order = document.getElementById('orderSelect').value;
             const status = document.getElementById('statusFilter').value;
-            const stage = document.getElementById('stageFilter').value;
-            const limit = document.getElementById('limitSelect').value;
+            const dateFrom = document.getElementById('dateFrom').value;
+            const dateTo = document.getElementById('dateTo').value;
+            const submittable = document.getElementById('submittableFilter').checked;
 
             try {
                 const params = new URLSearchParams({
-                    order: order,
-                    limit: limit
+                    page: currentPage,
+                    page_size: pageSize,
+                    order: order
                 });
                 if (status) params.append('status', status);
-                if (stage) params.append('stage', stage);
+                if (dateFrom) params.append('date_from', dateFrom);
+                if (dateTo) params.append('date_to', dateTo);
+                if (submittable) params.append('submittable', 'true');
 
                 const response = await fetch(`/api/alphas?${params}`);
-                const data = await response.json();
+                const result = await response.json();
 
-                document.getElementById('listInfo').textContent = `共 ${data.total} 条`;
+                // 更新分页信息
+                const pagination = result.pagination || {};
+                currentPage = pagination.page || 1;
+                totalPages = pagination.total_pages || 1;
+                const total = pagination.total || 0;
 
-                if (!data.alphas || data.alphas.length === 0) {
+                document.getElementById('totalCount').textContent = total;
+                document.getElementById('currentPage').textContent = currentPage;
+                document.getElementById('totalPages').textContent = totalPages;
+                document.getElementById('listInfo').textContent = `共 ${total} 条`;
+
+                if (!result.data || result.data.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="14" class="empty-list">暂无数据</td></tr>';
-                    return;
+                } else {
+                    renderAlphaTable(result.data);
                 }
 
-                renderAlphaTable(data.alphas);
+                // 更新分页按钮
+                updatePagination();
+
             } catch (error) {
                 tbody.innerHTML = `<tr><td colspan="14" class="empty-list">加载失败: ${error}</td></tr>`;
             }
+        }
+
+        // 更新分页按钮状态
+        function updatePagination() {
+            document.getElementById('firstPageBtn').disabled = currentPage === 1;
+            document.getElementById('prevPageBtn').disabled = currentPage === 1;
+            document.getElementById('nextPageBtn').disabled = currentPage === totalPages;
+            document.getElementById('lastPageBtn').disabled = currentPage === totalPages;
+
+            // 渲染页码
+            const pageNumbers = document.getElementById('pageNumbers');
+            pageNumbers.innerHTML = '';
+
+            // 显示当前页附近的页码
+            let start = Math.max(1, currentPage - 2);
+            let end = Math.min(totalPages, currentPage + 2);
+
+            for (let i = start; i <= end; i++) {
+                const btn = document.createElement('button');
+                btn.className = `page-btn ${i === currentPage ? 'active' : ''}`;
+                btn.textContent = i;
+                btn.onclick = () => goToPage(i);
+                pageNumbers.appendChild(btn);
+            }
+        }
+
+        // 跳转到指定页
+        function goToPage(page) {
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            refreshAlphaList();
+        }
+
+        // 应用筛选
+        function applyFilters() {
+            currentPage = 1;  // 重置到第一页
+            refreshAlphaList();
+        }
+
+        // 重置筛选
+        function resetFilters() {
+            document.getElementById('dateFrom').value = '';
+            document.getElementById('dateTo').value = '';
+            document.getElementById('submittableFilter').checked = false;
+            document.getElementById('statusFilter').value = '';
+            document.getElementById('orderSelect').value = 'is_checks_pass';
+            currentPage = 1;
+            refreshAlphaList();
         }
 
         // 渲染表格

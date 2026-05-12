@@ -9,16 +9,15 @@ from typing import List, Dict, Optional
 from datetime import datetime
 import json
 
+from db.db_connector import MySQLConnector
+
 
 class AlphaQueryService:
     """Alpha 数据库查询服务"""
 
     def __init__(self, db_config: dict):
         self.db_config = db_config
-
-    def get_connection(self):
-        """获取数据库连接"""
-        return pymysql.connect(**self.db_config, cursorclass=DictCursor)
+        self.db = MySQLConnector(db_config)
 
     def get_alpha_list(self, limit: int = 50, order_by: str = 'is_checks_pass',
                        status_filter: str = None, stage_filter: str = None) -> List[Dict]:
@@ -100,7 +99,7 @@ class AlphaQueryService:
 
         params.append(limit)
 
-        with self.get_connection() as conn:
+        with self.db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, params)
             return cursor.fetchall()
@@ -115,7 +114,7 @@ class AlphaQueryService:
         Returns:
             包含主表、设置、性能指标、检查结果的完整信息
         """
-        with self.get_connection() as conn:
+        with self.db.get_connection() as conn:
             cursor = conn.cursor()
 
             # 1. 主表信息
@@ -160,7 +159,7 @@ class AlphaQueryService:
     def get_last_created_time(self) -> Optional[datetime]:
         """获取数据库中最新的 Alpha 创建时间"""
         sql = "SELECT MAX(date_created) as max_date FROM alpha"
-        with self.get_connection() as conn:
+        with self.db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql)
             result = cursor.fetchone()
@@ -169,7 +168,7 @@ class AlphaQueryService:
     def get_last_sync_time(self) -> Optional[datetime]:
         """获取最后一次同步时间"""
         sql = "SELECT MAX(synced_at) as last_sync FROM alpha"
-        with self.get_connection() as conn:
+        with self.db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql)
             result = cursor.fetchone()
@@ -178,7 +177,7 @@ class AlphaQueryService:
     def get_alpha_count(self) -> int:
         """获取 Alpha 总数"""
         sql = "SELECT COUNT(*) as cnt FROM alpha"
-        with self.get_connection() as conn:
+        with self.db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql)
             result = cursor.fetchone()
@@ -186,7 +185,7 @@ class AlphaQueryService:
 
     def get_statistics(self) -> Dict:
         """获取统计信息"""
-        with self.get_connection() as conn:
+        with self.db.get_connection() as conn:
             cursor = conn.cursor()
 
             # 总数
@@ -258,7 +257,7 @@ class AlphaQueryService:
             LIMIT %s
         """
 
-        with self.get_connection() as conn:
+        with self.db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, (limit,))
             return cursor.fetchall()
@@ -285,7 +284,7 @@ class AlphaQueryService:
             ORDER BY check_name
         """
 
-        with self.get_connection() as conn:
+        with self.db.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, (alpha_id,))
             return cursor.fetchall()

@@ -872,10 +872,169 @@ class AlphaDashboard:
                     "is_submittable": (a['is_checks_fail'] or 0) == 0 and a['status'] == 'UNSUBMITTED' if a['status'] else False
                 })
 
-            return result
+            return {"data": result, "pagination": pagination}
         except Exception as e:
             logger.error(f"从数据库获取 Alpha 列表失败: {e}")
-            return []
+            return {"data": [], "pagination": {"page": page, "page_size": page_size, "total": 0, "total_pages": 0}}
+
+    def get_alphas_from_db_paginated(self, page: int = 1, page_size: int = 20,
+                                      order_by: str = 'is_checks_pass',
+                                      status_filter: str = None,
+                                      date_from: str = None,
+                                      date_to: str = None,
+                                      submittable_only: bool = False) -> Dict:
+        """从数据库获取 Alpha 列表（支持分页和筛选）"""
+        result = {
+            "data": [],
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": 0,
+                "total_pages": 0
+            }
+        }
+
+        if not self.query_service:
+            return result
+
+        try:
+            # 构建查询条件
+            where_clauses = []
+            params = []
+
+            if status_filter:
+                where_clauses.append("a.status = %s")
+                params.append(status_filter)
+
+            if date_from:
+                where_clauses.append("a.date_created >= %s")
+                params.append(date_from)
+
+            if date_to:
+                where_clauses.append("a.date_created <= %s")
+                params.append(date_to + " 23:59:59")
+
+            if submittable_only:
+                where_clauses.append("is_checks.is_checks_fail = 0")
+                where_clauses.append("a.status = 'UNSUBMITTED'")
+
+            where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+            # 查询总数
+            count_sql = f"""
+                SELECT COUNT(*) as total
+                FROM alpha a
+                LEFT JOIN alpha_performance ap_is ON a.id = ap_is.alpha_id AND ap_is.stage = 'IS'
+                LEFT JOIN (
+                    SELECT alpha_id,
+                           SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) as is_checks_pass,
+                           SUM(CASE WHEN result = 'FAIL' THEN 1 ELSE 0 END) as is_checks_fail
+                    FROM alpha_checks WHERE stage = 'IS'
+                    GROUP BY alpha_id
+                ) is_checks ON a.id = is_checks.alpha_id
+                WHERE {where_sql}
+            """
+            count_result = self.query_service.db.query_one(count_sql, tuple(params))
+            total = count_result['total'] if count_result else 0
+
+            # 计算分页
+            total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+            offset = (page - 1) * page_size
+
+            # 排序映射
+            order_map = {
+                'is_checks_pass': 'is_checks.is_checks_fail ASC, is_checks.is_checks_pass DESC, a.date_created DESC',
+                'date_created': 'a.date_created DESC',
+                'is_sharpe': 'ap_is.sharpe DESC',
+                'is_fitness': 'ap_is.fitness DESC'
+            }
+            order_sql = order_map.get(order_by, 'is_checks.is_checks_fail ASC, is_checks.is_checks_pass DESC, a.date_created DESC')
+
+            # 查询数据
+            sql = f"""
+                SELECT a.*,
+                       ap_is.sharpe as is_sharpe, ap_is.fitness as is_fitness,
+                       ap_is.turnover as is_turnover, ap_is.returns as is_returns,
+                       ap_is.drawdown as is_drawdown,
+                       is_checks.is_checks_pass, is_checks.is_checks_fail,
+                       ap_os.sharpe as os_sharpe, ap_os.fitness as os_fitness,
+                       ap_os.turnover as os_turnover,
+                       os_checks.os_checks_pass, os_checks.os_checks_fail,
+                       s.instrument_type, s.region, s.universe, s.delay, s.decay,
+                       s.neutralization, s.truncation
+                FROM alpha a
+                LEFT JOIN alpha_settings s ON a.id = s.alpha_id
+                LEFT JOIN alpha_performance ap_is ON a.id = ap_is.alpha_id AND ap_is.stage = 'IS'
+                LEFT JOIN alpha_performance ap_os ON a.id = ap_os.alpha_id AND ap_os.stage = 'OS'
+                LEFT JOIN (
+                    SELECT alpha_id,
+                           SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) as is_checks_pass,
+                           SUM(CASE WHEN result = 'FAIL' THEN 1 ELSE 0 END) as is_checks_fail
+                    FROM alpha_checks WHERE stage = 'IS'
+                    GROUP BY alpha_id
+                ) is_checks ON a.id = is_checks.alpha_id
+                LEFT JOIN (
+                    SELECT alpha_id,
+                           SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) as os_checks_pass,
+                           SUM(CASE WHEN result = 'FAIL' THEN 1 ELSE 0 END) as os_checks_fail
+                    FROM alpha_checks WHERE stage = 'OS'
+                    GROUP BY alpha_id
+                ) os_checks ON a.id = os_checks.alpha_id
+                WHERE {where_sql}
+                ORDER BY {order_sql}
+                LIMIT %s OFFSET %s
+            """
+            params.extend([page_size, offset])
+
+            alphas = self.query_service.db.query_all(sql, tuple(params))
+
+            # 格式化返回
+            formatted = []
+            for a in alphas:
+                formatted.append({
+                    "id": a['id'],
+                    "expression": a['expression'],
+                    "description": a['description'],
+                    "grade": a['grade'],
+                    "status": a['status'],
+                    "stage": a['stage'],
+                    "is_submitted": a['status'] != 'UNSUBMITTED' if a['status'] else False,
+                    "date_created": str(a['date_created']) if a['date_created'] else None,
+                    "date_submitted": str(a['date_submitted']) if a['date_submitted'] else None,
+                    "date_modified": str(a['date_modified']) if a['date_modified'] else None,
+                    "synced_at": str(a['synced_at']) if a['synced_at'] else None,
+                    "operator_count": a['operator_count'],
+                    # IS 指标
+                    "is_sharpe": float(a['is_sharpe']) if a['is_sharpe'] else None,
+                    "is_fitness": float(a['is_fitness']) if a['is_fitness'] else None,
+                    "is_turnover": float(a['is_turnover']) if a['is_turnover'] else None,
+                    "is_returns": float(a['is_returns']) if a['is_returns'] else None,
+                    "is_drawdown": float(a['is_drawdown']) if a['is_drawdown'] else None,
+                    # OS 指标
+                    "os_sharpe": float(a['os_sharpe']) if a['os_sharpe'] else None,
+                    "os_fitness": float(a['os_fitness']) if a['os_fitness'] else None,
+                    "os_turnover": float(a['os_turnover']) if a['os_turnover'] else None,
+                    # 检查结果统计
+                    "is_checks_pass": a['is_checks_pass'] or 0,
+                    "is_checks_fail": a['is_checks_fail'] or 0,
+                    "os_checks_pass": a['os_checks_pass'] or 0,
+                    "os_checks_fail": a['os_checks_fail'] or 0,
+                    # 可提交判断
+                    "is_submittable": (a['is_checks_fail'] or 0) == 0 and a['status'] == 'UNSUBMITTED' if a['status'] else False
+                })
+
+            result["data"] = formatted
+            result["pagination"] = {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages
+            }
+
+        except Exception as e:
+            logger.error(f"从数据库获取 Alpha 列表失败: {e}")
+
+        return result
 
     def get_alpha_detail_from_db(self, alpha_id: str) -> Dict:
         """从数据库获取 Alpha 详情（返回英文格式）"""
@@ -1107,20 +1266,26 @@ def api_failed_alphas():
 
 @app.route('/api/alphas')
 def api_alphas():
-    """API endpoint to get alpha list from database."""
-    limit = request.args.get('limit', 50, type=int)
+    """API endpoint to get alpha list from database (支持分页和筛选)."""
+    page = request.args.get('page', 1, type=int)
+    page_size = request.args.get('page_size', 20, type=int)
     order_by = request.args.get('order', 'is_checks_pass')
     status = request.args.get('status')
-    stage = request.args.get('stage')
+    date_from = request.args.get('date_from')
+    date_to = request.args.get('date_to')
+    submittable = request.args.get('submittable', 'false').lower() == 'true'
 
-    alphas = dashboard.get_alphas_from_db(
-        limit=limit,
+    result = dashboard.get_alphas_from_db_paginated(
+        page=page,
+        page_size=page_size,
         order_by=order_by,
         status_filter=status,
-        stage_filter=stage
+        date_from=date_from,
+        date_to=date_to,
+        submittable_only=submittable
     )
 
-    return jsonify({"alphas": alphas, "total": len(alphas)})
+    return jsonify(result)
 
 @app.route('/api/alpha-db/<alpha_id>')
 def api_alpha_detail_db(alpha_id):
