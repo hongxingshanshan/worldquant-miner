@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Alpha 数据库管理</title>
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
         * {
             margin: 0;
@@ -1058,14 +1060,28 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    alert(`同步完成!\n新增: ${result.stats.new}\n更新: ${result.stats.updated}\n跳过: ${result.stats.skipped}`);
+                    Swal.fire({
+                        icon: 'success',
+                        title: '同步完成',
+                        html: `<p>新增: <b>${result.stats.new}</b></p>
+                               <p>更新: <b>${result.stats.updated}</b></p>
+                               <p>跳过: <b>${result.stats.skipped}</b></p>`
+                    });
                     updateSyncStatus();
                     refreshAlphaList();
                 } else {
-                    alert('同步失败: ' + result.error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: '同步失败',
+                        text: result.error
+                    });
                 }
             } catch (error) {
-                alert('同步失败: ' + error);
+                Swal.fire({
+                    icon: 'error',
+                    title: '同步失败',
+                    text: error
+                });
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '<span>🔄</span> 增量同步';
@@ -1074,7 +1090,15 @@
 
         // 全量同步
         async function syncFull() {
-            if (!confirm('确定要执行全量同步吗？可能需要较长时间。')) {
+            const confirmResult = await Swal.fire({
+                icon: 'warning',
+                title: '确定执行全量同步？',
+                text: '可能需要较长时间',
+                showCancelButton: true,
+                confirmButtonText: '确定',
+                cancelButtonText: '取消'
+            });
+            if (!confirmResult.isConfirmed) {
                 return;
             }
 
@@ -1087,14 +1111,28 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    alert(`全量同步完成!\n总数: ${result.stats.total}\n新增: ${result.stats.new}\n更新: ${result.stats.updated}`);
+                    Swal.fire({
+                        icon: 'success',
+                        title: '全量同步完成',
+                        html: `<p>总数: <b>${result.stats.total}</b></p>
+                               <p>新增: <b>${result.stats.new}</b></p>
+                               <p>更新: <b>${result.stats.updated}</b></p>`
+                    });
                     updateSyncStatus();
                     refreshAlphaList();
                 } else {
-                    alert('同步失败: ' + result.error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: '同步失败',
+                        text: result.error
+                    });
                 }
             } catch (error) {
-                alert('同步失败: ' + error);
+                Swal.fire({
+                    icon: 'error',
+                    title: '同步失败',
+                    text: error
+                });
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '全量同步';
@@ -1103,42 +1141,102 @@
 
         // 优化 Alpha
         async function optimizeAlpha(alphaId) {
-            if (!confirm(`确定要优化 Alpha ${alphaId} 吗？`)) {
+            const confirmResult = await Swal.fire({
+                icon: 'question',
+                title: `优化 Alpha ${alphaId}?`,
+                text: '将使用 LLM 优化表达式并提交模拟测试',
+                showCancelButton: true,
+                confirmButtonText: '确定',
+                cancelButtonText: '取消'
+            });
+            if (!confirmResult.isConfirmed) {
                 return;
             }
+
+            Swal.fire({
+                title: '优化中...',
+                html: '请稍候',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
 
             try {
                 const response = await fetch(`/api/optimize-alpha/${alphaId}`, { method: 'POST' });
                 const result = await response.json();
 
                 if (result.success) {
-                    alert(`优化成功!\n模拟任务 ID: ${result.simulation_id || '无'}`);
+                    Swal.fire({
+                        icon: 'success',
+                        title: '优化成功',
+                        html: `<p>模拟任务 ID: <b>${result.simulation_id || '无'}</b></p>
+                               <p style="margin-top:10px;color:#666;font-size:12px;">可在 WorldQuant Brain 查看模拟结果</p>`
+                    });
                 } else {
-                    alert('优化失败: ' + result.error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: '优化失败',
+                        text: result.error
+                    });
                 }
             } catch (error) {
-                alert('优化失败: ' + error);
+                Swal.fire({
+                    icon: 'error',
+                    title: '优化失败',
+                    text: error
+                });
             }
         }
 
         // 提交 Alpha
         async function submitAlpha(alphaId) {
-            if (!confirm(`确定要提交 Alpha ${alphaId} 到 WorldQuant Brain 吗？`)) {
+            const confirmResult = await Swal.fire({
+                icon: 'warning',
+                title: `提交 Alpha ${alphaId}?`,
+                text: '将提交到 WorldQuant Brain',
+                showCancelButton: true,
+                confirmButtonText: '确定提交',
+                cancelButtonText: '取消',
+                confirmButtonColor: '#3085d6'
+            });
+            if (!confirmResult.isConfirmed) {
                 return;
             }
+
+            Swal.fire({
+                title: '提交中...',
+                html: '正在提交到 WorldQuant Brain，请稍候',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
 
             try {
                 const response = await fetch(`/api/submit-alpha/${alphaId}`, { method: 'POST' });
                 const result = await response.json();
 
                 if (result.success) {
-                    alert(`提交成功!\n${result.message || alphaId}`);
-                    refreshAlphaList(); // 刷新列表
+                    Swal.fire({
+                        icon: 'success',
+                        title: '提交成功',
+                        text: result.message || `Alpha ${alphaId} 已提交`
+                    });
+                    refreshAlphaList();
                 } else {
-                    alert('提交失败: ' + (result.error || '未知错误'));
+                    Swal.fire({
+                        icon: 'error',
+                        title: '提交失败',
+                        text: result.error || '未知错误'
+                    });
                 }
             } catch (error) {
-                alert('提交失败: ' + error);
+                Swal.fire({
+                    icon: 'error',
+                    title: '提交失败',
+                    text: error
+                });
             }
         }
 
