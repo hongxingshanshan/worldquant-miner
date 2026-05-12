@@ -381,35 +381,43 @@ class AlphaOptimizer:
             if result != 'FAIL' and result != 'FAILED':
                 continue
 
+            # 转换为 float 以支持格式化（处理 Decimal 类型）
+            try:
+                limit_f = float(limit) if limit is not None else None
+                value_f = float(value) if value is not None else None
+            except (TypeError, ValueError):
+                limit_f = None
+                value_f = None
+
             # 根据检查类型构建不同的描述
             if name == "CONCENTRATED_WEIGHT":
                 # CONCENTRATED_WEIGHT 可能没有 limit/value，用默认描述
-                if limit is not None and value is not None:
-                    failure_details.append(f"{name}: 权重集中度过高 (当前值 {value:.4f} > 阈值 {limit})")
+                if limit_f is not None and value_f is not None:
+                    failure_details.append(f"{name}: 权重集中度过高 (当前值 {value_f:.4f} > 阈值 {limit_f})")
                 else:
                     failure_details.append(f"{name}: 权重过于集中在少数股票")
             elif name == "LOW_SUB_UNIVERSE_SHARPE":
-                if limit is not None and value is not None:
-                    failure_details.append(f"{name}: 子宇宙夏普值 {value:.2f} < 阈值 {limit:.2f}")
+                if limit_f is not None and value_f is not None:
+                    failure_details.append(f"{name}: 子宇宙夏普值 {value_f:.2f} < 阈值 {limit_f:.2f}")
                 else:
                     failure_details.append(f"{name}: 子宇宙夏普值过低")
             elif name == "LOW_SHARPE":
-                if limit is not None and value is not None:
-                    failure_details.append(f"{name}: 夏普值 {value:.2f} < 阈值 {limit:.2f}")
+                if limit_f is not None and value_f is not None:
+                    failure_details.append(f"{name}: 夏普值 {value_f:.2f} < 阈值 {limit_f:.2f}")
                 else:
                     failure_details.append(f"{name}: 夏普值过低")
             elif name == "LOW_FITNESS":
-                if limit is not None and value is not None:
-                    failure_details.append(f"{name}: 适应度 {value:.2f} < 阈值 {limit:.2f}")
+                if limit_f is not None and value_f is not None:
+                    failure_details.append(f"{name}: 适应度 {value_f:.2f} < 阈值 {limit_f:.2f}")
                 else:
                     failure_details.append(f"{name}: 适应度过低")
             elif name == "HIGH_TURNOVER":
-                if limit is not None and value is not None:
-                    failure_details.append(f"{name}: 换手率 {value:.2%} > 阈值 {limit:.2%}")
+                if limit_f is not None and value_f is not None:
+                    failure_details.append(f"{name}: 换手率 {value_f:.2%} > 阈值 {limit_f:.2%}")
                 else:
                     failure_details.append(f"{name}: 换手率过高")
-            elif limit is not None and value is not None:
-                failure_details.append(f"{name}: 当前值 {value} < 阈值 {limit}")
+            elif limit_f is not None and value_f is not None:
+                failure_details.append(f"{name}: 当前值 {value_f} < 阈值 {limit_f}")
             elif name:
                 failure_details.append(name)
 

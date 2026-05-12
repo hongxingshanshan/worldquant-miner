@@ -47,7 +47,6 @@ class AlphaQueue:
         }
         self.queue.append(item)
         self.stats["generated"]["total"] += 1
-        logger.debug(f"[队列] 添加生成 Alpha: {alpha[:40]}...")
         return item
 
     def add_optimized(self, alpha: str, original: str, opt_type: str,
@@ -75,7 +74,6 @@ class AlphaQueue:
         }
         self.queue.append(item)
         self.stats["optimized"]["total"] += 1
-        logger.debug(f"[队列] 添加优化 Alpha ({opt_type}): {original[:30]}... → {alpha[:30]}...")
         return item
 
     def get_next_batch(self, batch_size: int = 10) -> List[Dict]:
