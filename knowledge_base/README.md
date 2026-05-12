@@ -1,6 +1,6 @@
 # WorldQuant Brain 知识库
 
-本目录包含 WorldQuant Brain Alpha 挖矿项目所需的全部知识库文件。
+本目录包含 WorldQuant Brain Alpha 挖掘项目所需的全部知识库文件。
 
 ## 文件列表
 

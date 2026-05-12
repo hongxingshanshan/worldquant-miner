@@ -466,7 +466,7 @@ generation_one/naive-ollama/alpha_orchestrator.py (1080行)
 
 | Agent | 审查范围 | 运行时间 |
 |-------|---------|---------|
-| reviewer-core | 核心挖矿模块代码质量 | 329s |
+| reviewer-core | 核心挖掘模块代码质量 | 329s |
 | reviewer-security | 安全性审查 | 354s |
 | reviewer-performance | 性能审查 | 254s |
 | reviewer-architecture | 架构设计审查 | 337s |

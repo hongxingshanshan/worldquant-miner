@@ -1,7 +1,7 @@
 # WorldQuant Miner 项目规则
 
 ## 项目概述
-这是一个 WorldQuant Brain Alpha 挖矿项目，使用 Ollama 本地 LLM 生成和提交 Alpha 表达式。
+这是一个 WorldQuant Brain Alpha 挖掘项目，使用 Ollama 本地 LLM 生成和提交 Alpha 表达式。
 
 ## 技术栈
 - Python 3.x

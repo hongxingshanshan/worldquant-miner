@@ -76,7 +76,7 @@ worldquant-miner/
 │   │   ├── test_workflow_e2e.py          # 端到端工作流
 │   │   ├── test_api_integration.py       # WorldQuant API 集成
 │   │   ├── test_model_switching.py       # 模型切换
-│   │   └── test_concurrent_mining.py     # 并发挖矿
+│   │   └── test_concurrent_mining.py     # 并发挖掘
 │   │
 │   ├── performance/                      # 性能测试
 │   │   ├── __init__.py
@@ -178,7 +178,7 @@ worldquant-miner/
 │   ├── orchestrator/                     # 编排器
 │   │   ├── __init__.py
 │   │   ├── base.py                       # 编排器抽象接口
-│   │   ├── mining_orchestrator.py        # 挖矿编排器
+│   │   ├── mining_orchestrator.py        # 挖掘编排器
 │   │   ├── model_manager.py              # 模型管理
 │   │   ├── task_scheduler.py             # 任务调度
 │   │   └── workflow_engine.py            # 工作流引擎
@@ -233,7 +233,7 @@ worldquant-miner/
 │   │   ├── main.py                       # CLI 入口
 │   │   ├── commands/                     # 命令定义
 │   │   │   ├── __init__.py
-│   │   │   ├── mine.py                   # 挖矿命令
+│   │   │   ├── mine.py                   # 挖掘命令
 │   │   │   ├── submit.py                 # 提交命令
 │   │   │   ├── status.py                 # 状态命令
 │   │   │   └── config.py                 # 配置命令
@@ -299,7 +299,7 @@ worldquant-miner/
 ├── scripts/                              # 脚本文件
 │   ├── setup.sh                          # Linux/Mac 安装脚本
 │   ├── setup.bat                         # Windows 安装脚本
-│   ├── start_mining.bat                  # 启动挖矿
+│   ├── start_mining.bat                  # 启动挖掘
 │   ├── start_dashboard.bat               # 启动 Dashboard
 │   ├── start_gui.bat                     # 启动 GUI
 │   ├── check_health.py                   # 健康检查
@@ -351,7 +351,7 @@ class Config:
     api_max_retries: int = 3
     api_rate_limit: float = 2.0  # 请求/秒
     
-    # 挖矿配置
+    # 挖掘配置
     max_concurrent: int = 10
     max_results: int = 1000
     knowledge_base_path: str = "knowledge_base"

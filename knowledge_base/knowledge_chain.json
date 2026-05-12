@@ -1,0 +1,122 @@
+{
+  "knowledge_chain": {
+    "basic_concepts": [
+      {
+        "concept": "Alpha 定义与目标",
+        "description": "Alpha 是一种用于预测资产未来收益的数学表达式。其核心目标是寻找具有经济逻辑、高夏普比率、低换手率且与现有 Alpha 低相关性的信号。",
+        "source": "worldquantbrain_alpha_guide.md"
+      },
+      {
+        "concept": "数据类型分类",
+        "description": "主要分为 MATRIX（矩阵数据，如价格、财务字段，随时间变化）和 VECTOR（向量数据，如行业代码、货币代码，通常为静态属性）。数据集涵盖价格成交量、基本面、分析师预测、新闻情绪等。",
+        "source": "worldquant_data_fields.json, worldquantbrain_datasets_reference.md"
+      },
+      {
+        "concept": "核心操作符分类",
+        "description": "分为时间序列算子（ts_*，如 ts_rank, ts_delta）、横截面算子（如 rank, zscore）、分组算子（group_*）和数学/逻辑算子。需注意操作符的输入类型兼容性（SCALAR/VECTOR/MATRIX）。",
+        "source": "worldquant_operators.json, worldquantbrain_alpha_guide.md"
+      },
+      {
+        "concept": "NaN (Not a Number)",
+        "description": "表示无效操作结果或缺失数据。当股票的 Alpha 值为 NaN 时，该股票不会获得权重，从而降低覆盖率。NaN 处理是模拟设置的关键环节。",
+        "source": "worldquant_community_knowledge.md"
+      }
+    ],
+    "technical_methods": [
+      {
+        "method": "模拟设置优化",
+        "description": "包含 NaN Handling、Pasteurization（数据清洗）和 Truncation（截断）。",
+        "best_practice": "NaN Handling 设为 ON 可自动处理缺失值；Truncation 常用值为 0.08 以控制极端值；Pasteurization 用于处理异常值。",
+        "source": "worldquant_community_knowledge.md"
+      },
+      {
+        "method": "表达式构建序列",
+        "description": "遵循特定的算子应用顺序以确保类型匹配和逻辑清晰。",
+        "best_practice": "推荐顺序：数据字段 -> 时间序列算子 -> 横截面算子 -> 分组算子。例如：group_neutralize(rank(ts_mean(close, 20)), industry)。",
+        "source": "worldquant_community_knowledge.md"
+      },
+      {
+        "method": "参数选择范围",
+        "description": "针对时间窗口、截断值和中性化设置的推荐区间。",
+        "best_practice": "时间窗口推荐 20-180 天；截断值 0.01-0.08；中性化推荐 INDUSTRY/SUBINDUSTRY。",
+        "source": "worldquantbrain_alpha_guide.md"
+      },
+      {
+        "method": "相关性控制",
+        "description": "降低自相关和生产相关以提高 Alpha 的独立价值。",
+        "best_practice": "使用不同数据源组合、变换时间窗口、应用行业中性化、增加衰减参数。",
+        "source": "worldquant_community_knowledge.md"
+      }
+    ],
+    "practical_experience": [
+      {
+        "experience": "高质量 Alpha 特征",
+        "lesson": "成功的 Alpha 通常满足：Fitness > 0.5，Sharpe > 1.5，Turnover < 0.5，且具有低相关性。",
+        "source": "worldquantbrain_alpha_guide.md"
+      },
+      {
+        "experience": "避免常见错误",
+        "lesson": "不要对事件数据（如新闻）使用时序算子；避免直接使用 a/b 除法（应使用 divide(a,b) 防止除零）；注意数据延迟。",
+        "source": "worldquantbrain_alpha_guide.md, worldquantbrain_datasets_reference.md"
+      },
+      {
+        "experience": "防止过拟合",
+        "lesson": "优先关注样本外（OS）表现而非仅样本内（IS）；使用经济逻辑驱动而非纯数据挖掘；保持表达式简洁。",
+        "source": "worldquant_community_knowledge.md"
+      },
+      {
+        "experience": "数据字段选择策略",
+        "lesson": "优先使用高频更新字段，避免过于稀疏的数据。对于基本面数据，注意季度财报发布间的空窗期处理。",
+        "source": "worldquantbrain_alpha_guide.md, worldquant_community_knowledge.md"
+      }
+    ],
+    "advanced_strategies": [
+      {
+        "strategy": "经典 Alpha 模式复用",
+        "description": "利用已验证有效的模式快速构建新 Alpha。",
+        "conditions": "动量类、价值类、质量类、波动率类、流动性类。",
+        "source": "worldquantbrain_alpha_templates.md"
+      },
+      {
+        "strategy": "复合 Alpha 构建",
+        "description": "结合多个数据源或信号以增强稳健性。",
+        "conditions": "例如结合价格动量与分析师预测修正：rank(close / ts_mean(close, 20)) + rank(earnings_surprise)。",
+        "source": "worldquant_community_knowledge.md"
+      },
+      {
+        "strategy": "中性化与衰减应用",
+        "description": "通过中性化消除行业偏差，通过衰减降低换手率和噪音。",
+        "conditions": "使用 group_neutralize 消除行业/板块偏差；使用 ts_decay_linear 或 decay 参数平滑信号。",
+        "source": "worldquantbrain_alpha_guide.md"
+      }
+    ]
+  },
+  "key_insights": [
+    "简洁且具有清晰金融逻辑的表达式往往比复杂表达式更稳定（奥卡姆剃刀原则）。",
+    "数据质量决定 Alpha 上限，需重点关注 NaN 处理、极端值控制和数据稀疏性问题。",
+    "操作符的序列至关重要，错误的顺序（如对 SCALAR 使用时序算子）会导致类型错误。",
+    "相关性是 Alpha 价值的核心指标，低相关性意味着更高的边际贡献。"
+  ],
+  "recommended_patterns": [
+    "动量模式: ts_delta(close, 20) 或 rank(ts_mean(returns, 20))",
+    "价值模式: rank(divide(earnings, price)) 或 -rank(pe_ratio)",
+    "质量模式: rank(roa) 或 rank(divide(cashflow_op, assets))",
+    "低波模式: -rank(ts_std_dev(returns, 60))",
+    "中性化组合: group_neutralize(rank(ts_delta(field, 20)), sector)"
+  ],
+  "metadata": {
+    "created_at": "2026-05-13T02:44:45.619415",
+    "llm_provider": "online",
+    "model": "glm-5.1",
+    "source_files": [
+      "knowledge_chain.json",
+      "README.md",
+      "worldquantbrain_alpha_guide.md",
+      "worldquantbrain_alpha_templates.md",
+      "worldquantbrain_datasets_reference.md",
+      "worldquant_community_knowledge.md",
+      "worldquant_data_fields.json",
+      "worldquant_operators.json"
+    ]
+  }
+}
