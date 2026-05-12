@@ -12,7 +12,6 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
-from dataclasses import dataclass
 import signal
 import atexit
 import ctypes
@@ -20,7 +19,7 @@ import logging
 
 # 导入配置管理器
 try:
-    from config_manager import get_config_manager, ConfigManager, Config, ModelInfo as ConfigModelInfo
+    from config_manager import get_config_manager, ConfigManager, Config
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
@@ -31,6 +30,13 @@ try:
     LLM_CLIENT_AVAILABLE = True
 except ImportError:
     LLM_CLIENT_AVAILABLE = False
+
+# 导入模型舰队管理器
+try:
+    from model_fleet_manager import ModelFleetManager, ModelInfo
+    MODEL_FLEET_AVAILABLE = True
+except ImportError:
+    MODEL_FLEET_AVAILABLE = False
 
 # 使用统一日志配置（多进程安全）
 try:
@@ -43,264 +49,8 @@ except ImportError:
 if not CONFIG_AVAILABLE:
     logger.warning("config_manager 模块未找到，使用默认配置")
 
-@dataclass
-class ModelInfo:
-    """Information about a model in the fleet."""
-    name: str
-    size_mb: int
-    priority: int  # Lower number = higher priority (used first)
-    description: str
-
-    @classmethod
-    def from_config(cls, config_model) -> 'ModelInfo':
-        """从配置模块的 ModelInfo 转换"""
-        return cls(
-            name=config_model.name,
-            size_mb=config_model.size_mb,
-            priority=config_model.priority,
-            description=config_model.description
-        )
-
-class ModelFleetManager:
-    """Manages a fleet of models with automatic downgrading on VRAM issues."""
-
-    def __init__(self, ollama_url: str = "http://localhost:11434", config_path: Optional[str] = None, model_override: Optional[str] = None):
-        self.ollama_url = ollama_url
-        self.current_model_index = 0
-        self.vram_error_count = 0
-        self.max_vram_errors = 3  # Number of VRAM errors before downgrading
-        self.model_override = model_override  # 启动时指定的模型
-
-        # 加载配置
-        self.config = None
-        if CONFIG_AVAILABLE:
-            self.config_manager = get_config_manager(config_path)
-            self.config = self.config_manager.config
-            self.model_fleet = [ModelInfo.from_config(m) for m in self.config.model_fleet]
-            logger.info(f"从配置文件加载模型舰队: {[m.name for m in self.model_fleet]}")
-        else:
-            # 默认模型舰队
-            self.model_fleet = [
-                ModelInfo("llama3:8b", 4661, 1, "Llama 3 8B - Primary model"),
-                ModelInfo("qwen2.5-coder:1.5b", 986, 2, "Qwen 2.5 Coder 1.5B - Fallback model"),
-            ]
-
-        # 如果指定了模型，调整舰队顺序
-        if model_override:
-            self._reorder_fleet_for_model(model_override)
-
-        # State file to persist current model selection
-        self.state_file = "model_fleet_state.json"
-        self.load_state()
-
-    def _reorder_fleet_for_model(self, model_name: str):
-        """将指定模型移到舰队首位"""
-        for i, model in enumerate(self.model_fleet):
-            if model.name == model_name or model.name.startswith(model_name):
-                # 将该模型移到首位
-                self.model_fleet.insert(0, self.model_fleet.pop(i))
-                logger.info(f"模型 {model.name} 已设置为首选")
-                return
-        # 如果模型不在舰队中，添加到首位
-        self.model_fleet.insert(0, ModelInfo(model_name, 0, 0, f"User specified: {model_name}"))
-        logger.info(f"添加用户指定模型到舰队首位: {model_name}")
-        
-    def load_state(self):
-        """Load the current model state from file."""
-        try:
-            if os.path.exists(self.state_file):
-                with open(self.state_file, 'r') as f:
-                    state = json.load(f)
-                    self.current_model_index = state.get('current_model_index', 0)
-                    self.vram_error_count = state.get('vram_error_count', 0)
-                    logger.info(f"Loaded state: model_index={self.current_model_index}, vram_errors={self.vram_error_count}")
-        except Exception as e:
-            logger.warning(f"Could not load state: {e}")
-            self.current_model_index = 0
-            self.vram_error_count = 0
-    
-    def save_state(self):
-        """Save the current model state to file."""
-        try:
-            state = {
-                'current_model_index': self.current_model_index,
-                'vram_error_count': self.vram_error_count,
-                'current_model': self.get_current_model().name,
-                'timestamp': time.time()
-            }
-            with open(self.state_file, 'w') as f:
-                json.dump(state, f, indent=2)
-            logger.info(f"Saved state: {state}")
-        except Exception as e:
-            logger.error(f"Could not save state: {e}")
-    
-    def get_current_model(self) -> ModelInfo:
-        """Get the current model in use."""
-        if self.current_model_index >= len(self.model_fleet):
-            self.current_model_index = len(self.model_fleet) - 1
-        return self.model_fleet[self.current_model_index]
-    
-    def get_available_models(self) -> List[str]:
-        """Get list of available models via Ollama API."""
-        try:
-            response = requests.get(f"{self.ollama_url}/api/tags")
-            if response.status_code == 200:
-                models_data = response.json()
-                return [model['name'] for model in models_data.get('models', [])]
-            else:
-                logger.error(f"Failed to get available models: {response.status_code}")
-                return []
-        except Exception as e:
-            logger.error(f"Error getting available models: {e}")
-            return []
-    
-    def ensure_model_available(self, model_name: str) -> bool:
-        """Ensure a specific model is available, download if needed."""
-        available_models = self.get_available_models()
-        
-        if model_name in available_models:
-            logger.info(f"Model {model_name} is already available")
-            return True
-        
-        logger.info(f"Model {model_name} not found, downloading...")
-        try:
-            response = requests.post(f"{self.ollama_url}/api/pull", json={'name': model_name})
-            if response.status_code == 200:
-                logger.info(f"Successfully downloaded model {model_name}")
-                return True
-            else:
-                logger.error(f"Failed to download model {model_name}: {response.status_code}")
-                return False
-        except Exception as e:
-            logger.error(f"Error downloading model {model_name}: {e}")
-            return False
-    
-    def detect_vram_error(self, log_line: str) -> bool:
-        """Detect VRAM recovery timeout errors in log lines."""
-        vram_error_indicators = [
-            "gpu VRAM usage didn't recover within timeout",
-            "VRAM usage didn't recover",
-            "gpu memory exhausted",
-            "CUDA out of memory",
-            "GPU memory allocation failed",
-            "msg=\"gpu VRAM usage didn't recover within timeout\"",
-            "level=WARN source=sched.go"
-        ]
-        
-        return any(indicator.lower() in log_line.lower() for indicator in vram_error_indicators)
-    
-    def handle_vram_error(self) -> bool:
-        """Handle VRAM error by downgrading to a smaller model."""
-        self.vram_error_count += 1
-        logger.warning(f"VRAM error detected! Count: {self.vram_error_count}/{self.max_vram_errors}")
-        
-        if self.vram_error_count >= self.max_vram_errors:
-            return self.downgrade_model()
-        
-        self.save_state()
-        return False
-    
-    def downgrade_model(self) -> bool:
-        """Downgrade to the next smaller model in the fleet."""
-        if self.current_model_index >= len(self.model_fleet) - 1:
-            logger.error("Already using the smallest model in the fleet!")
-            logger.warning("VRAM error persists with smallest model - triggering application reset")
-            return self.trigger_application_reset()
-        
-        old_model = self.get_current_model()
-        self.current_model_index += 1
-        new_model = self.get_current_model()
-        
-        logger.warning(f"Downgrading model: {old_model.name} -> {new_model.name}")
-        
-        # Ensure the new model is available
-        if not self.ensure_model_available(new_model.name):
-            logger.error(f"Failed to ensure model {new_model.name} is available")
-            self.current_model_index -= 1  # Revert
-            return False
-        
-        # Reset VRAM error count
-        self.vram_error_count = 0
-        
-        # Save state
-        self.save_state()
-        
-        # Update the alpha generator configuration
-        self.update_alpha_generator_config(new_model.name)
-        
-        logger.info(f"Successfully downgraded to {new_model.name}")
-        return True
-    
-    def trigger_application_reset(self) -> bool:
-        """Trigger a complete application reset when VRAM issues persist with smallest model."""
-        try:
-            logger.warning("Triggering application reset due to persistent VRAM issues")
-            
-            # Reset to the largest model
-            self.current_model_index = 0
-            self.vram_error_count = 0
-            self.save_state()
-            
-            # Update configuration to use largest model
-            self.update_alpha_generator_config(self.get_current_model().name)
-            
-            logger.info("Application reset completed - returning to largest model")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error during application reset: {e}")
-            return False
-    
-    def update_alpha_generator_config(self, model_name: str):
-        """Update the alpha generator configuration to use the new model."""
-        try:
-            # Update the default model in alpha_generator_ollama.py
-            with open('alpha_generator_ollama.py', 'r') as f:
-                content = f.read()
-            
-            # Replace the default model
-            content = content.replace(
-                    "default='llama3.2:8b'",
-                f"default='{model_name}'"
-            )
-            content = content.replace(
-                "getattr(self, 'model_name', 'llama3.2:8b')",
-                f"getattr(self, 'model_name', '{model_name}')"
-            )
-            
-            with open('alpha_generator_ollama.py', 'w') as f:
-                f.write(content)
-            
-            logger.info(f"Updated alpha generator config to use {model_name}")
-        except Exception as e:
-            logger.error(f"Error updating alpha generator config: {e}")
-    
-    def get_fleet_status(self) -> Dict:
-        """Get the current status of the model fleet."""
-        current_model = self.get_current_model()
-        available_models = self.get_available_models()
-        
-        return {
-            'current_model': {
-                'name': current_model.name,
-                'size_mb': current_model.size_mb,
-                'description': current_model.description,
-                'index': self.current_model_index
-            },
-            'vram_error_count': self.vram_error_count,
-            'max_vram_errors': self.max_vram_errors,
-            'available_models': available_models,
-            'fleet_size': len(self.model_fleet),
-            'can_downgrade': self.current_model_index < len(self.model_fleet) - 1
-        }
-    
-    def reset_to_largest_model(self):
-        """Reset to the largest model in the fleet."""
-        self.current_model_index = 0
-        self.vram_error_count = 0
-        self.save_state()
-        logger.info("Reset to largest model in fleet")
-        return self.update_alpha_generator_config(self.get_current_model().name)
+if not MODEL_FLEET_AVAILABLE:
+    logger.warning("model_fleet_manager 模块未找到，VRAM 管理功能不可用")
 
 class AlphaOrchestrator:
     def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434",
