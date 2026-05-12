@@ -32,11 +32,12 @@ try:
 except ImportError:
     LLM_CLIENT_AVAILABLE = False
 
-# 使用统一日志配置
+# 使用统一日志配置（多进程安全）
 try:
-    from logging_config import get_logger
+    from logging_config import get_logger, setup_mp_logging, shutdown_mp_logging
     logger = get_logger(__name__)
 except ImportError:
+    import logging
     logger = logging.getLogger(__name__)
 
 if not CONFIG_AVAILABLE:
@@ -860,6 +861,9 @@ class AlphaOrchestrator:
             self.stop_processes()
 
 def main():
+    # 初始化多进程安全日志系统
+    setup_mp_logging('INFO')
+
     parser = argparse.ArgumentParser(description='Alpha Orchestrator - Manage alpha generation and submission')
     parser.add_argument('--credentials', type=str, default='./credential.txt',
                       help='Path to credentials file (default: ./credential.txt)')

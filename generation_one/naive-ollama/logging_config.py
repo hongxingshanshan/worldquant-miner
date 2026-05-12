@@ -1,54 +1,73 @@
 """
-极简日志配置 - 使用 print 输出，避免 logging 模块的复杂性
+统一日志配置
 
-多进程环境下，logging 模块可能导致各种问题：
-- 文件锁定
-- 缓冲区未刷新
-- 内部锁竞争
-
-使用 print 直接输出到 stdout，简单可靠。
+优先使用多进程安全的 QueueHandler 模式
+如果 mp_logging 不可用，则回退到简单的 print 模式
 """
 import sys
-from datetime import datetime
 import os
 
-LOG_FORMAT = '{} - {} - [PID:{}] {}:{} {}'
+# 尝试导入多进程安全日志
+try:
+    from mp_logging import setup_logging, get_logger as mp_get_logger, shutdown_logging
+    MP_LOGGING_AVAILABLE = True
+except ImportError:
+    MP_LOGGING_AVAILABLE = False
 
 _initialized = False
 
-def _init_logging():
-    """初始化日志系统"""
+
+def setup_mp_logging(log_level: str = 'INFO', log_file: str = None):
+    """
+    初始化多进程安全日志系统
+
+    应在主程序开始时调用一次
+    """
     global _initialized
     if _initialized:
         return
+
+    if MP_LOGGING_AVAILABLE:
+        setup_logging(log_level, log_file)
     _initialized = True
 
 
 def get_logger(name: str = None):
-    """获取一个简单的 logger 对象"""
-    _init_logging()
+    """
+    获取 logger 实例
+
+    优先使用多进程安全的 QueueHandler 模式
+    如果不可用，则使用简单的 print 模式
+    """
+    if MP_LOGGING_AVAILABLE:
+        return mp_get_logger(name)
+
+    # 回退到简单模式
     return SimpleLogger(name or 'root')
 
 
+def shutdown_mp_logging():
+    """关闭日志系统"""
+    if MP_LOGGING_AVAILABLE:
+        shutdown_logging()
+
+
 class SimpleLogger:
-    """简单日志类，使用 print 输出"""
+    """
+    简单日志类，使用 print 输出
+
+    用于极端情况或 mp_logging 不可用时
+    """
+    from datetime import datetime
 
     def __init__(self, name: str):
         self.name = name
 
     def _log(self, level: str, msg: str):
         """输出日志"""
-        import threading
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+        timestamp = self.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
         pid = os.getpid()
-        # 获取调用者的文件名和行号
-        import inspect
-        frame = inspect.currentframe()
-        # 向上查找，跳过 _log, info, debug 等方法
-        caller_frame = frame.f_back.f_back
-        filename = os.path.basename(caller_frame.f_code.co_filename)
-        lineno = caller_frame.f_lineno
-        print(LOG_FORMAT.format(timestamp, level, pid, filename, lineno, msg), flush=True)
+        print(f'{timestamp} - {level} - [PID:{pid}] {self.name} {msg}', flush=True)
 
     def info(self, msg: str):
         self._log('INFO', msg)
@@ -64,8 +83,3 @@ class SimpleLogger:
 
     def critical(self, msg: str):
         self._log('CRITICAL', msg)
-
-
-def shutdown_logging():
-    """关闭日志系统（兼容性函数）"""
-    pass
