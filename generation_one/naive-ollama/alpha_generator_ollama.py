@@ -539,10 +539,10 @@ class AlphaGenerator:
                     submitted_context += "\n"
 
             # 获取随机策略提示
-            strategy_hints = _get_random_strategy_hints()
+            strategy_hints = get_random_strategy_hints()
 
             # 获取随机示例格式
-            example_format = _get_random_example_format()
+            example_format = get_random_example_format()
 
             # 获取采样的数据字段 ID（随机从高覆盖率字段中选择）
             sampled_field_ids = get_sampled_field_ids(max_fields=100, randomize=True)
