@@ -765,7 +765,7 @@ class AlphaDashboard:
         return result
 
     def submit_alpha_by_id(self, alpha_id: str) -> Dict:
-        """提交 Alpha 到 WorldQuant Brain"""
+        """提交 Alpha 到 WorldQuant Brain（带轮询监控）"""
         result = {
             "success": False,
             "alpha_id": alpha_id,
@@ -780,31 +780,33 @@ class AlphaDashboard:
                 result["error"] = "无法连接到 WorldQuant Brain API"
                 return result
 
-            # 调用提交 API
+            # 1. 发起提交请求
             url = f"https://api.worldquantbrain.com/alphas/{alpha_id}/submit"
             response = sess.post(url, timeout=30)
 
-            if response.status_code == 201:
-                result["success"] = True
-                result["status"] = "SUBMITTED"
-                result["message"] = "提交成功"
-            elif response.status_code == 409:
+            if response.status_code == 409:
                 result["success"] = True
                 result["status"] = "ALREADY_SUBMITTED"
                 result["message"] = "已提交过"
-            elif response.status_code == 403:
+                return result
+
+            if response.status_code == 403:
                 # 403 通常是检查项未通过
                 result["error"] = "提交被拒绝: Alpha 检查项未全部通过"
                 try:
                     error_data = response.json()
-                    # 解析失败的检查项
                     checks = error_data.get("is", {}).get("checks", [])
                     failed_checks = [c.get("name") for c in checks if c.get("result") == "FAIL"]
+                    pending_checks = [c.get("name") for c in checks if c.get("result") == "PENDING"]
                     if failed_checks:
                         result["error"] = f"提交被拒绝: 检查项未通过 - {', '.join(failed_checks)}"
+                    elif pending_checks:
+                        result["error"] = f"提交被拒绝: 检查项待定 - {', '.join(pending_checks)}"
                 except:
                     pass
-            else:
+                return result
+
+            if response.status_code not in [200, 201]:
                 result["error"] = f"提交失败: HTTP {response.status_code}"
                 try:
                     error_data = response.json()
@@ -812,6 +814,12 @@ class AlphaDashboard:
                         result["error"] = f"提交失败: {error_data['message']}"
                 except:
                     pass
+                return result
+
+            # 2. 轮询监控提交状态
+            logger.info(f"Alpha {alpha_id} 提交请求已接受，开始监控...")
+            monitor_result = self._monitor_submission(alpha_id, sess, max_timeout_minutes=10)
+            result.update(monitor_result)
 
         except requests.exceptions.Timeout:
             result["error"] = "请求超时"
@@ -819,6 +827,122 @@ class AlphaDashboard:
             logger.error(f"提交 Alpha {alpha_id} 失败: {e}")
             result["error"] = str(e)
 
+        return result
+
+    def _monitor_submission(self, alpha_id: str, sess, max_timeout_minutes: int = 10) -> Dict:
+        """
+        轮询监控提交状态
+
+        Args:
+            alpha_id: Alpha ID
+            sess: requests Session
+            max_timeout_minutes: 最大等待时间（分钟）
+
+        Returns:
+            监控结果
+        """
+        result = {
+            "success": False,
+            "alpha_id": alpha_id,
+            "status": None,
+            "message": None,
+            "error": None
+        }
+
+        url = f"https://api.worldquantbrain.com/alphas/{alpha_id}/submit"
+        start_time = time.time()
+        max_timeout_seconds = max_timeout_minutes * 60
+        base_sleep_time = 3
+        max_sleep_time = 30
+        attempt = 0
+
+        while (time.time() - start_time) < max_timeout_seconds:
+            attempt += 1
+            elapsed_seconds = time.time() - start_time
+
+            try:
+                response = sess.get(url, timeout=30)
+
+                # 404 表示已提交或不存在
+                if response.status_code == 404:
+                    result["success"] = True
+                    result["status"] = "ALREADY_SUBMITTED"
+                    result["message"] = "已提交过"
+                    return result
+
+                if response.status_code != 200:
+                    result["error"] = f"监控失败: HTTP {response.status_code}"
+                    return result
+
+                # 空响应表示仍在提交中
+                if not response.text or not response.text.strip():
+                    sleep_time = min(base_sleep_time * (1.5 ** (attempt - 1)), max_sleep_time)
+                    logger.info(f"Alpha {alpha_id} 提交中... 等待 {sleep_time:.1f}s (已等待 {elapsed_seconds:.0f}s)")
+                    time.sleep(sleep_time)
+                    continue
+
+                # 尝试解析 JSON（提交完成）
+                try:
+                    data = response.json()
+                    logger.info(f"Alpha {alpha_id} 提交完成: {data}")
+
+                    # 检查返回数据中的状态
+                    if isinstance(data, dict):
+                        # 检查是否有错误信息
+                        if data.get("error"):
+                            result["error"] = data.get("error")
+                            return result
+
+                        # 检查 is.checks 中的失败项
+                        is_data = data.get("is", {})
+                        checks = is_data.get("checks", [])
+                        failed_checks = [c.get("name") for c in checks if c.get("result") == "FAIL"]
+                        pending_checks = [c.get("name") for c in checks if c.get("result") == "PENDING"]
+
+                        if failed_checks:
+                            result["error"] = f"提交被拒绝: 检查项未通过 - {', '.join(failed_checks)}"
+                            return result
+
+                        if pending_checks:
+                            result["error"] = f"提交被拒绝: 检查项待定 - {', '.join(pending_checks)}"
+                            return result
+
+                        # 检查提交状态
+                        status = data.get("status", "")
+                        if status == "SUBMITTED":
+                            result["success"] = True
+                            result["status"] = "SUBMITTED"
+                            result["message"] = "提交成功"
+                        elif status == "UNSUBMITTED":
+                            # 未提交状态，可能是检查未通过
+                            result["error"] = "提交失败: Alpha 仍处于未提交状态"
+                        else:
+                            result["success"] = True
+                            result["status"] = status or "SUBMITTED"
+                            result["message"] = "提交完成"
+
+                    return result
+
+                except json.JSONDecodeError:
+                    # 非 JSON 响应，继续等待
+                    sleep_time = min(base_sleep_time * (1.5 ** (attempt - 1)), max_sleep_time)
+                    time.sleep(sleep_time)
+                    continue
+
+            except requests.exceptions.Timeout:
+                logger.warning(f"监控请求超时 (attempt {attempt})")
+                sleep_time = min(base_sleep_time * 2, max_sleep_time)
+                time.sleep(sleep_time)
+                continue
+
+            except Exception as e:
+                logger.warning(f"监控请求失败 (attempt {attempt}): {e}")
+                sleep_time = min(base_sleep_time * 2, max_sleep_time)
+                time.sleep(sleep_time)
+                continue
+
+        # 超时
+        result["error"] = f"提交监控超时（等待超过 {max_timeout_minutes} 分钟）"
         return result
 
     # ==================== 数据库相关方法 ====================
