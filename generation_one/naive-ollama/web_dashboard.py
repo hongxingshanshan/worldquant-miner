@@ -431,6 +431,8 @@ class AlphaDashboard:
                     credentials = json.load(f)
 
                 self.sess = requests.Session()
+                # 禁用代理，直接连接 WorldQuant API
+                self.sess.trust_env = False
                 self.sess.auth = HTTPBasicAuth(credentials[0], credentials[1])
                 response = self.sess.post('https://api.worldquantbrain.com/authentication', timeout=10)
 
