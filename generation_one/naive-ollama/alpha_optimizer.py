@@ -1050,20 +1050,19 @@ class AlphaOptimizer:
             )
 
             # 提取模拟任务 ID
+            # 数据结构: test_result = {"success": True, "result": test_alpha_with_source 返回值}
+            # test_alpha_with_source 返回值 = {"status": "success", "result": {"id": sim_id, ...}, ...}
             sim_id = None
             if test_result.get("success") and test_result.get("result"):
-                result_data = test_result["result"]
-                # result_data 是 test_alpha_with_source 的返回值
-                # 结构: {"status": "success", "result": {"id": sim_id, ...}, "source": ...}
+                result_data = test_result["result"]  # test_alpha_with_source 的返回值
                 if isinstance(result_data, dict):
-                    # 检查是否有嵌套的 result
-                    if result_data.get("status") == "success" and result_data.get("result"):
-                        inner_result = result_data.get("result")
-                        if isinstance(inner_result, dict):
-                            sim_id = inner_result.get("id")
-                    else:
-                        # 直接尝试获取 id
-                        sim_id = result_data.get("id")
+                    # 从 result_data.result.id 获取
+                    inner_result = result_data.get("result")
+                    if isinstance(inner_result, dict):
+                        sim_id = inner_result.get("id")
+                        logger.info(f"提取到 simulation_id: {sim_id}")
+
+            logger.info(f"优化完成: sim_id={sim_id}, alpha_id={alpha_id}")
 
             # 返回优化结果（模拟已由 _test_alpha 提交）
             return {
