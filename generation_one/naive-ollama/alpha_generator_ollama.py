@@ -67,66 +67,11 @@ try:
 except ImportError:
     logger = logging.getLogger(__name__)
 
-# 知识库路径（如果 alpha_patterns 模块不可用，使用后备值）
-if not ALPHA_PATTERNS_AVAILABLE:
-    KNOWLEDGE_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                                        'knowledge_base')
-    SUCCESSFUL_PATTERNS_FILE = "successful_patterns.json"
-    SUBMITTED_ALPHAS_CACHE = "submitted_alphas_cache.json"
-
-
-# 后备函数定义（当 alpha_patterns 模块不可用时）
-if not ALPHA_PATTERNS_AVAILABLE:
-    def load_successful_patterns(max_patterns: int = 20, randomize: bool = True) -> List[Dict]:
-        """加载成功的 alpha 模式（后备版本）"""
-        return []
-
-    def load_submitted_alphas(sess, max_alphas: int = 20) -> List[Dict]:
-        """从 WorldQuant Brain API 获取已提交的 alpha（后备版本）"""
-        return []
-
-    def load_knowledge_base(randomize: bool = True) -> str:
-        """加载知识库（后备版本）"""
-        return ""
-
-    def load_data_fields_reference(max_fields: int = 80, randomize: bool = True) -> str:
-        """加载数据字段参考（后备版本）"""
-        return ""
-
-    def get_random_strategy_hints() -> str:
-        """获取随机策略提示（后备版本）"""
-        return ""
-
-    def get_random_example_format() -> str:
-        """获取随机示例格式（后备版本）"""
-        return ""
-
-
-# 后备类定义（当 alpha_simulator 模块不可用时）
-if not ALPHA_SIMULATOR_AVAILABLE:
-    class RetryQueue:
-        """重试队列（后备版本）"""
-        def __init__(self, generator, max_retries=3, retry_delay=60):
-            self.queue = Queue()
-            self.max_retries = max_retries
-            self.retry_delay = retry_delay
-            self.generator = generator
-
-        def add(self, alpha: str, retry_count: int = 0):
-            self.queue.put((alpha, retry_count))
-
-    class AlphaConsumer(Thread):
-        """消费者线程（后备版本）"""
-        def __init__(self, generator, check_interval: int = 5, batch_size: int = 10):
-            super().__init__(daemon=True)
-            self.generator = generator
-            self.running = True
-
-        def run(self):
-            pass
-
-        def stop(self):
-            self.running = False
+# 知识库路径
+KNOWLEDGE_BASE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                                    'knowledge_base')
+SUCCESSFUL_PATTERNS_FILE = "successful_patterns.json"
+SUBMITTED_ALPHAS_CACHE = "submitted_alphas_cache.json"
 
 
 class AlphaGenerator:
