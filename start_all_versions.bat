@@ -2,11 +2,21 @@
 title WorldQuant Miner - Version Selector
 color 0B
 
+REM 设置 Python 环境路径（使用 miniconda3）
+set PYTHON_EXE=C:\ProgramData\miniconda3\python.exe
+if not exist "%PYTHON_EXE%" (
+    echo [Error] Python not found at %PYTHON_EXE%
+    echo Please install miniconda3 or update PYTHON_EXE path
+    pause
+    exit /b 1
+)
+
 echo.
 echo ================================================================================
 echo            WorldQuant Miner - Version Launcher
 echo ================================================================================
 echo   Current Time: %date% %time%
+echo   Python: %PYTHON_EXE%
 echo ================================================================================
 echo.
 
@@ -82,9 +92,9 @@ if not exist credential.txt (
 )
 echo [Starting] Using default model from config file...
 echo [Starting] Web Dashboard will be available at http://localhost:5000
-start "Web Dashboard - naive-ollama" python web_dashboard.py
+start "Web Dashboard - naive-ollama" "%PYTHON_EXE%" web_dashboard.py
 timeout /t 2 /nobreak >nul
-python alpha_orchestrator.py --credentials ./credential.txt --mode continuous --config config.json
+"%PYTHON_EXE%" alpha_orchestrator.py --credentials ./credential.txt --mode continuous --config config.json
 goto end
 
 :consultant_naive
@@ -102,9 +112,9 @@ if not exist credential.txt (
 )
 echo [Starting] Using default model from config file...
 echo [Starting] Web Dashboard will be available at http://localhost:5000
-start "Web Dashboard - consultant-naive" python web_dashboard.py
+start "Web Dashboard - consultant-naive" "%PYTHON_EXE%" web_dashboard.py
 timeout /t 2 /nobreak >nul
-python alpha_orchestrator.py --credentials ./credential.txt --mode continuous --mining-interval 6 --batch-size 3 --max-concurrent 2 --config config.json
+"%PYTHON_EXE%" alpha_orchestrator.py --credentials ./credential.txt --mode continuous --mining-interval 6 --batch-size 3 --max-concurrent 2 --config config.json
 goto end
 
 :consultant_bandit
@@ -122,9 +132,9 @@ if not exist credential.txt (
 )
 echo [Starting] Using default model from config file...
 echo [Starting] Web Dashboard will be available at http://localhost:8080
-start "Web Dashboard - multi-arm-bandit" python web_dashboard.py
+start "Web Dashboard - multi-arm-bandit" "%PYTHON_EXE%" web_dashboard.py
 timeout /t 2 /nobreak >nul
-python alpha_orchestrator.py --credentials ./credential.txt --mode continuous --mining-interval 6 --batch-size 3 --max-concurrent 2 --config config.json
+"%PYTHON_EXE%" alpha_orchestrator.py --credentials ./credential.txt --mode continuous --mining-interval 6 --batch-size 3 --max-concurrent 2 --config config.json
 goto end
 
 :generation_two
@@ -134,8 +144,8 @@ echo   Starting Generation Two - Self-optimizing System
 echo ================================================================================
 echo.
 cd generation_two
-python -c "import PyQt5" 2>nul
-if errorlevel 1 pip install PyQt5 -q
+"%PYTHON_EXE%" -c "import PyQt5" 2>nul
+if errorlevel 1 "%PYTHON_EXE%" -m pip install PyQt5 -q
 if not exist credential.txt copy ..\generation_one\naive-ollama\credential.txt . >nul 2>&1
 if not exist credential.txt (
     echo [Error] credential.txt not found
@@ -143,7 +153,7 @@ if not exist credential.txt (
     exit /b 1
 )
 echo [Starting] Cyberpunk GUI...
-python gui/run_gui.py credential.txt
+"%PYTHON_EXE%" gui/run_gui.py credential.txt
 goto end
 
 :alpha_icu
@@ -160,7 +170,7 @@ if not exist credential.txt (
     exit /b 1
 )
 echo [Starting] Alpha Analysis...
-python main.py --credentials ./credential.txt
+"%PYTHON_EXE%" main.py --credentials ./credential.txt
 goto end
 
 :model_selector
@@ -170,7 +180,7 @@ echo   Model Selection Tool
 echo ================================================================================
 echo.
 cd generation_one\naive-ollama
-python model_selector.py --config config.json
+"%PYTHON_EXE%" model_selector.py --config config.json
 goto end
 
 :end

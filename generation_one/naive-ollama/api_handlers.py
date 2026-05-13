@@ -15,7 +15,8 @@ sys.path.insert(0, str(project_root))
 # 向量数据库相关导入
 try:
     import chromadb
-    from vector_store import EmbeddingModel
+    from vector_store.embedding import EmbeddingModel
+    from vector_store.store import VectorStore
     VECTOR_DB_AVAILABLE = True
     VECTOR_DB_PATH = project_root / 'vector_store' / 'chroma_db'
     vector_embedder = None
