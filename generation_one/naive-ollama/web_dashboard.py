@@ -28,11 +28,7 @@ except ImportError as e:
     DB_AVAILABLE = False
 
 # 导入 API 处理函数
-try:
-    from api_handlers import register_api_routes
-    API_HANDLERS_AVAILABLE = True
-except ImportError:
-    API_HANDLERS_AVAILABLE = False
+from api_handlers import register_api_routes
 
 app = Flask(__name__)
 
@@ -1334,22 +1330,7 @@ class AlphaDashboard:
 dashboard = AlphaDashboard()
 
 # 注册 API 路由
-if API_HANDLERS_AVAILABLE:
-    register_api_routes(app, dashboard)
-else:
-    # 后备：直接定义路由（简化版本）
-    @app.route('/')
-    def index():
-        return render_template('dashboard.html')
-
-    @app.route('/api/status')
-    def api_status():
-        return jsonify(dashboard.get_system_status())
-
-    @app.route('/api/logs')
-    def api_logs():
-        lines = request.args.get('lines', 50, type=int)
-        return jsonify({"logs": dashboard.get_logs(lines)})
+register_api_routes(app, dashboard)
 
 
 def setup_cleanup_handler():

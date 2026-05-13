@@ -1058,13 +1058,13 @@ class AlphaOptimizer:
             )
 
             # 提取模拟任务 ID
-            # 数据结构: test_result = {"success": True, "result": test_alpha_with_source 返回值}
-            # test_alpha_with_source 返回值 = {"status": "success", "result": {"id": sim_id, ...}, ...}
+            # 数据结构: test_result = {"success": True, "result": test_alpha 返回值}
+            # test_alpha 返回值 = {"status": "success", "result": {"id": sim_id, ...}, "source": "optimized", ...}
             sim_id = None
             if test_result.get("success") and test_result.get("result"):
-                result_data = test_result["result"]  # test_alpha_with_source 的返回值
+                result_data = test_result["result"]
                 if isinstance(result_data, dict):
-                    # 从 result_data.result.id 获取
+                    # 从 result.result.id 获取
                     inner_result = result_data.get("result")
                     if isinstance(inner_result, dict):
                         sim_id = inner_result.get("id")
@@ -1103,17 +1103,14 @@ class AlphaOptimizer:
             测试结果
         """
         try:
-            if hasattr(self.wq_client, 'test_alpha_with_source'):
-                # 使用带来源追踪的测试方法
-                result = self.wq_client.test_alpha_with_source(
+            if hasattr(self.wq_client, 'test_alpha'):
+                # 直接使用整合后的 test_alpha 方法
+                result = self.wq_client.test_alpha(
                     alpha=expression,
                     source="optimized",
                     original_alpha=original_alpha,
                     opt_type=opt_type
                 )
-                return {"success": True, "result": result}
-            elif hasattr(self.wq_client, 'test_alpha'):
-                result = self.wq_client.test_alpha(expression)
                 return {"success": True, "result": result}
             else:
                 logger.warning("wq_client 没有 test_alpha 方法")

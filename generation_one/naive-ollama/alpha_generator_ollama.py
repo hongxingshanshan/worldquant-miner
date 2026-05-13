@@ -1106,11 +1106,33 @@ Strategy Suggestions (pick one or combine):
         with open(simulated_file, 'w') as f:
             json.dump(existing, f, indent=2)
 
-    def test_alpha(self, alpha: str) -> Dict:
+    def test_alpha(self, alpha: str, source: str = "generated",
+                   original_alpha: str = None, opt_type: str = None) -> Dict:
+        """
+        测试 Alpha 表达式并记录来源
+
+        Args:
+            alpha: Alpha 表达式
+            source: 来源（generated/optimized）
+            original_alpha: 原始表达式（优化时）
+            opt_type: 优化类型（优化时）
+
+        Returns:
+            测试结果，包含 simulation_id
+        """
         result = self._test_alpha_impl(alpha)
+
+        # 处理模拟限制
         if result.get("status") == "error" and "SIMULATION_LIMIT_EXCEEDED" in result.get("message", ""):
             self.retry_queue.add(alpha)
             return {"status": "queued", "message": "Added to retry queue"}
+
+        # 添加来源信息
+        result["source"] = source
+        if source == "optimized":
+            result["original_alpha"] = original_alpha
+            result["optimization_type"] = opt_type
+
         return result
 
     def _test_alpha_impl(self, alpha_expression: str) -> Dict:
@@ -1475,30 +1497,6 @@ Strategy Suggestions (pick one or combine):
         except Exception as e:
             logger.error(f"获取用户 Alpha 异常: {e}")
             return []
-
-    def test_alpha_with_source(self, alpha: str, source: str = "generated",
-                                original_alpha: str = None, opt_type: str = None) -> Dict:
-        """
-        测试 Alpha 并记录来源
-
-        Args:
-            alpha: Alpha 表达式
-            source: 来源（generated/optimized）
-            original_alpha: 原始表达式（优化时）
-            opt_type: 优化类型（优化时）
-
-        Returns:
-            测试结果
-        """
-        result = self.test_alpha(alpha)
-
-        # 添加来源信息
-        result["source"] = source
-        if source == "optimized":
-            result["original_alpha"] = original_alpha
-            result["optimization_type"] = opt_type
-
-        return result
 
     def get_queue_stats(self) -> Dict:
         """
