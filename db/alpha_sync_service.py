@@ -454,15 +454,159 @@ class AlphaSyncService:
             except:
                 return None
 
-    def get_alpha_by_id(self, alpha_id: str) -> Optional[Dict]:
+    def sync_alpha_by_id(self, alpha_id: str) -> Dict:
         """
-        根据 ID 获取 Alpha 详情
+        根据 Alpha ID 从 API 获取并同步到数据库
+
+        Args:
+            alpha_id: Alpha ID（如 'E5q3lZ3J'）
+
+        Returns:
+            同步结果 {'success': bool, 'alpha_id': str, 'message': str, 'data': dict}
+        """
+        logger.info(f"开始同步 Alpha: {alpha_id}")
+
+        try:
+            # 1. 从 API 获取 Alpha 详情
+            resp = self.sess.get(
+                f'https://api.worldquantbrain.com/alphas/{alpha_id}',
+                timeout=30
+            )
+
+            if resp.status_code == 404:
+                return {
+                    'success': False,
+                    'alpha_id': alpha_id,
+                    'message': f'Alpha 不存在: {alpha_id}',
+                    'data': None
+                }
+
+            if resp.status_code != 200:
+                return {
+                    'success': False,
+                    'alpha_id': alpha_id,
+                    'message': f'API 错误: HTTP {resp.status_code}',
+                    'data': None
+                }
+
+            alpha = resp.json()
+            logger.info(f"API 返回 Alpha 数据: {alpha.get('id')}, grade={alpha.get('grade')}, stage={alpha.get('stage')}")
+
+            # 2. 检查是否已存在
+            existing = self.db.query_one(
+                "SELECT id FROM alpha WHERE id = %s", (alpha_id,)
+            )
+
+            # 3. 保存到数据库
+            self._save_alpha(alpha)
+
+            action = '更新' if existing else '新增'
+            logger.info(f"Alpha {alpha_id} 同步成功 ({action})")
+
+            return {
+                'success': True,
+                'alpha_id': alpha_id,
+                'message': f'同步成功 ({action})',
+                'data': {
+                    'id': alpha.get('id'),
+                    'expression': alpha.get('regular', {}).get('code', '')[:80],
+                    'grade': alpha.get('grade'),
+                    'stage': alpha.get('stage'),
+                    'status': alpha.get('status'),
+                    'sharpe': alpha.get('is', {}).get('sharpe'),
+                    'fitness': alpha.get('is', {}).get('fitness'),
+                    'is_new': not existing
+                }
+            }
+
+        except requests.exceptions.Timeout:
+            return {
+                'success': False,
+                'alpha_id': alpha_id,
+                'message': 'API 请求超时',
+                'data': None
+            }
+        except Exception as e:
+            logger.error(f"同步 Alpha {alpha_id} 失败: {e}")
+            return {
+                'success': False,
+                'alpha_id': alpha_id,
+                'message': f'同步失败: {str(e)}',
+                'data': None
+            }
+
+    def sync_alphas_by_ids(self, alpha_ids: List[str]) -> Dict:
+        """
+        批量同步多个 Alpha
+
+        Args:
+            alpha_ids: Alpha ID 列表
+
+        Returns:
+            同步结果统计
+        """
+        logger.info(f"开始批量同步 {len(alpha_ids)} 个 Alpha")
+
+        results = {
+            'total': len(alpha_ids),
+            'success': 0,
+            'failed': 0,
+            'new': 0,
+            'updated': 0,
+            'details': []
+        }
+
+        for alpha_id in alpha_ids:
+            result = self.sync_alpha_by_id(alpha_id)
+            results['details'].append(result)
+
+            if result['success']:
+                results['success'] += 1
+                if result['data'] and result['data'].get('is_new'):
+                    results['new'] += 1
+                else:
+                    results['updated'] += 1
+            else:
+                results['failed'] += 1
+
+        logger.info(f"批量同步完成: 成功 {results['success']}, 失败 {results['failed']}")
+        return results
+
+    def fetch_alpha_from_api(self, alpha_id: str) -> Optional[Dict]:
+        """
+        仅从 API 获取 Alpha 数据，不入库
 
         Args:
             alpha_id: Alpha ID
 
         Returns:
-            Alpha 详情字典
+            Alpha 原始数据
+        """
+        try:
+            resp = self.sess.get(
+                f'https://api.worldquantbrain.com/alphas/{alpha_id}',
+                timeout=30
+            )
+
+            if resp.status_code != 200:
+                logger.warning(f"获取 Alpha {alpha_id} 失败: HTTP {resp.status_code}")
+                return None
+
+            return resp.json()
+
+        except Exception as e:
+            logger.error(f"获取 Alpha {alpha_id} 异常: {e}")
+            return None
+
+    def get_alpha_by_id(self, alpha_id: str) -> Optional[Dict]:
+        """
+        根据 ID 从数据库获取 Alpha 详情
+
+        Args:
+            alpha_id: Alpha ID
+
+        Returns:
+            Alpha 详情字典（包含关联数据）
         """
         alpha = self.db.query_one(
             "SELECT * FROM alpha WHERE id = %s", (alpha_id,)
@@ -487,6 +631,24 @@ class AlphaSyncService:
             "SELECT * FROM alpha_checks WHERE alpha_id = %s", (alpha_id,)
         )
         alpha['checks'] = checks
+
+        # 获取参赛信息
+        competitions = self.db.query_all(
+            "SELECT * FROM alpha_competitions WHERE alpha_id = %s", (alpha_id,)
+        )
+        alpha['competitions'] = competitions
+
+        # 获取团队信息
+        team = self.db.query_one(
+            "SELECT * FROM alpha_team WHERE alpha_id = %s", (alpha_id,)
+        )
+        alpha['team'] = team
+
+        # 获取分类信息
+        classifications = self.db.query_all(
+            "SELECT * FROM alpha_classifications WHERE alpha_id = %s", (alpha_id,)
+        )
+        alpha['classifications'] = classifications
 
         return alpha
 
