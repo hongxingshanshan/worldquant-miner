@@ -19,8 +19,10 @@ try:
     VECTOR_DB_AVAILABLE = True
     VECTOR_DB_PATH = project_root / 'vector_store' / 'chroma_db'
     vector_embedder = None
-except ImportError:
+    VECTOR_DB_ERROR = None
+except ImportError as e:
     VECTOR_DB_AVAILABLE = False
+    VECTOR_DB_ERROR = str(e)
 
 
 def get_vector_embedder():
@@ -177,7 +179,7 @@ def register_api_routes(app, dashboard):
     def api_vector_stats():
         """向量数据库统计信息"""
         if not VECTOR_DB_AVAILABLE:
-            return jsonify({'error': '向量数据库不可用'}), 500
+            return jsonify({'error': f'向量数据库不可用: {VECTOR_DB_ERROR}'}), 500
 
         try:
             client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
