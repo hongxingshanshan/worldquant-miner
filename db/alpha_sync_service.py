@@ -3,8 +3,6 @@ Alpha 数据同步服务
 
 从 WorldQuant Brain API 同步 Alpha 数据到 MySQL 数据库
 """
-import requests
-from requests.auth import HTTPBasicAuth
 from typing import List, Dict, Optional
 from datetime import datetime, timezone, timedelta
 import json
@@ -12,6 +10,8 @@ import os
 import logging
 
 from .db_connector import MySQLConnector
+from common.wq_api_client import WorldQuantBrainAPIClient
+from common.wq_exceptions import WQNotFoundError, WQAPIError
 
 # 中国时区 UTC+8
 CN_TIMEZONE = timezone(timedelta(hours=8))
@@ -35,9 +35,8 @@ class AlphaSyncService:
             credentials_path: 凭证文件路径
             db_config: 数据库配置
         """
-        # 初始化 API 客户端
-        self.sess = requests.Session()
-        self._setup_auth(credentials_path)
+        # 初始化统一 API 客户端
+        self.api_client = WorldQuantBrainAPIClient.from_credentials(credentials_path)
 
         # 初始化数据库连接
         self.db = MySQLConnector(db_config)
@@ -50,20 +49,6 @@ class AlphaSyncService:
             'skipped': 0,
             'errors': 0
         }
-
-    def _setup_auth(self, credentials_path: str):
-        """设置认证"""
-        with open(credentials_path, 'r') as f:
-            creds = json.load(f)
-        username, password = creds
-        self.sess.auth = HTTPBasicAuth(username, password)
-        self.sess.headers.update({'Content-Type': 'application/json'})
-
-        # 登录获取 session
-        resp = self.sess.post('https://api.worldquantbrain.com/authentication')
-        if resp.status_code not in [200, 201]:
-            raise Exception(f"认证失败: {resp.text}")
-        logger.info("WorldQuant API 认证成功")
 
     def init_database(self):
         """初始化数据库（创建表）"""
@@ -226,25 +211,16 @@ class AlphaSyncService:
 
     def _fetch_alphas(self, limit: int = 100, offset: int = 0, order: str = '-dateCreated') -> List[Dict]:
         """从 API 获取 Alpha 列表"""
-        params = {
-            'limit': limit,
-            'offset': offset,
-            'order': order,
-            'hidden': 'false'
-        }
-
-        resp = self.sess.get(
-            'https://api.worldquantbrain.com/users/self/alphas',
-            params=params,
-            timeout=60
-        )
-
-        if resp.status_code != 200:
-            logger.error(f"API 错误: {resp.status_code} - {resp.text[:200]}")
+        try:
+            return self.api_client.get_user_alphas(
+                limit=limit,
+                offset=offset,
+                order=order,
+                hidden=False
+            )
+        except WQAPIError as e:
+            logger.error(f"API 错误: {e}")
             return []
-
-        data = resp.json()
-        return data.get('results', [])
 
     def _save_alpha(self, alpha: Dict):
         """保存单个 Alpha 到数据库"""
@@ -468,28 +444,7 @@ class AlphaSyncService:
 
         try:
             # 1. 从 API 获取 Alpha 详情
-            resp = self.sess.get(
-                f'https://api.worldquantbrain.com/alphas/{alpha_id}',
-                timeout=30
-            )
-
-            if resp.status_code == 404:
-                return {
-                    'success': False,
-                    'alpha_id': alpha_id,
-                    'message': f'Alpha 不存在: {alpha_id}',
-                    'data': None
-                }
-
-            if resp.status_code != 200:
-                return {
-                    'success': False,
-                    'alpha_id': alpha_id,
-                    'message': f'API 错误: HTTP {resp.status_code}',
-                    'data': None
-                }
-
-            alpha = resp.json()
+            alpha = self.api_client.get_alpha(alpha_id)
             logger.info(f"API 返回 Alpha 数据: {alpha.get('id')}, grade={alpha.get('grade')}, stage={alpha.get('stage')}")
 
             # 2. 检查是否已存在
@@ -519,11 +474,18 @@ class AlphaSyncService:
                 }
             }
 
-        except requests.exceptions.Timeout:
+        except WQNotFoundError:
             return {
                 'success': False,
                 'alpha_id': alpha_id,
-                'message': 'API 请求超时',
+                'message': f'Alpha 不存在: {alpha_id}',
+                'data': None
+            }
+        except WQAPIError as e:
+            return {
+                'success': False,
+                'alpha_id': alpha_id,
+                'message': f'API 错误: {e}',
                 'data': None
             }
         except Exception as e:
@@ -583,18 +545,11 @@ class AlphaSyncService:
             Alpha 原始数据
         """
         try:
-            resp = self.sess.get(
-                f'https://api.worldquantbrain.com/alphas/{alpha_id}',
-                timeout=30
-            )
-
-            if resp.status_code != 200:
-                logger.warning(f"获取 Alpha {alpha_id} 失败: HTTP {resp.status_code}")
-                return None
-
-            return resp.json()
-
-        except Exception as e:
+            return self.api_client.get_alpha(alpha_id)
+        except WQNotFoundError:
+            logger.warning(f"获取 Alpha {alpha_id} 失败: Alpha 不存在")
+            return None
+        except WQAPIError as e:
             logger.error(f"获取 Alpha {alpha_id} 异常: {e}")
             return None
 
