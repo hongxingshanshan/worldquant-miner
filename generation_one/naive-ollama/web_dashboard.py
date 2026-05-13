@@ -42,7 +42,7 @@ logger.setLevel(logging.WARNING)
 class AlphaDashboard:
     def __init__(self):
         self.status_file = "dashboard_status.json"
-        self.log_file = "alpha_mining.log"  # 统一日志文件
+        self.log_file = "logs/app.log"  # 统一日志文件
         self.submission_log_file = "submission_log.json"
         self.results_dir = "results"
         self.logs_dir = "logs"
