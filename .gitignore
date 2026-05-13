@@ -106,3 +106,243 @@ package.json
 **/consolidation.json
 claude-flow.config.json
 claude-flow.config.export.json
+knowledge_base/forum_fetch_history.json
+knowledge_base/forum_post_20260513124721_Welcome_to_the_BRAIN_Community_Read_this_first_extracted.json
+knowledge_base/forum_post_20260513124721_Welcome_to_the_BRAIN_Community_Read_this_first.json
+knowledge_base/forum_post_20260513212600_We_value_your_privacy_extracted.json
+knowledge_base/forum_post_20260513212600_We_value_your_privacy.json
+knowledge_base/forum_post_20260513212737_We_value_your_privacy_extracted.json
+knowledge_base/forum_post_20260513212737_We_value_your_privacy.json
+knowledge_base/forum_post_20260513214352_supportworldquantbraincom_extracted.json
+knowledge_base/forum_post_20260513214352_supportworldquantbraincom.json
+knowledge_base/forum_post_20260513221116_Welcome_to_the_BRAIN_Community_Read_this_first_extracted.json
+knowledge_base/forum_post_20260513221116_Welcome_to_the_BRAIN_Community_Read_this_first.json
+knowledge_base/forum_post_20260513224656_The_Power_of_Data_Hygiene_and_Signal_Refinement_extracted.json
+knowledge_base/forum_post_20260513224656_The_Power_of_Data_Hygiene_and_Signal_Refinement.json
+knowledge_base/forum_post_20260513230407_The_Power_of_Data_Hygiene_and_Signal_Refinement.json
+vector_store/chroma_db/chroma.sqlite3
+vector_store/chroma_db/6e3f4bee-9579-4631-bace-023730b0a0cd/data_level0.bin
+vector_store/chroma_db/6e3f4bee-9579-4631-bace-023730b0a0cd/header.bin
+vector_store/chroma_db/6e3f4bee-9579-4631-bace-023730b0a0cd/index_metadata.pickle
+vector_store/chroma_db/6e3f4bee-9579-4631-bace-023730b0a0cd/length.bin
+vector_store/chroma_db/6e3f4bee-9579-4631-bace-023730b0a0cd/link_lists.bin
+vector_store/browser_data/Last Browser
+vector_store/browser_data/Last Version
+vector_store/browser_data/Local State
+vector_store/browser_data/Variations
+vector_store/browser_data/Crashpad/settings.dat
+vector_store/browser_data/Default/Account Web Data
+vector_store/browser_data/Default/Account Web Data-journal
+vector_store/browser_data/Default/Affiliation Database
+vector_store/browser_data/Default/Affiliation Database-journal
+vector_store/browser_data/Default/BookmarkMergedSurfaceOrdering
+vector_store/browser_data/Default/DIPS
+vector_store/browser_data/Default/Favicons
+vector_store/browser_data/Default/Favicons-journal
+vector_store/browser_data/Default/History
+vector_store/browser_data/Default/History-journal
+vector_store/browser_data/Default/LOCK
+vector_store/browser_data/Default/LOG
+vector_store/browser_data/Default/LOG.old
+vector_store/browser_data/Default/Login Data
+vector_store/browser_data/Default/Login Data For Account
+vector_store/browser_data/Default/Login Data For Account-journal
+vector_store/browser_data/Default/Login Data-journal
+vector_store/browser_data/Default/Network Action Predictor
+vector_store/browser_data/Default/Network Action Predictor-journal
+vector_store/browser_data/Default/Preferences
+vector_store/browser_data/Default/PreferredApps
+vector_store/browser_data/Default/README
+vector_store/browser_data/Default/Secure Preferences
+vector_store/browser_data/Default/ServerCertificate
+vector_store/browser_data/Default/ServerCertificate-journal
+vector_store/browser_data/Default/SharedStorage
+vector_store/browser_data/Default/Shortcuts
+vector_store/browser_data/Default/Shortcuts-journal
+vector_store/browser_data/Default/Top Sites
+vector_store/browser_data/Default/Top Sites-journal
+vector_store/browser_data/Default/trusted_vault.pb
+vector_store/browser_data/Default/Web Data
+vector_store/browser_data/Default/Web Data-journal
+vector_store/browser_data/Default/AutofillAiModelCache/LOCK
+vector_store/browser_data/Default/AutofillAiModelCache/LOG
+vector_store/browser_data/Default/AutofillAiModelCache/LOG.old
+vector_store/browser_data/Default/AutofillStrikeDatabase/LOCK
+vector_store/browser_data/Default/AutofillStrikeDatabase/LOG
+vector_store/browser_data/Default/AutofillStrikeDatabase/LOG.old
+vector_store/browser_data/Default/BudgetDatabase/LOCK
+vector_store/browser_data/Default/BudgetDatabase/LOG
+vector_store/browser_data/Default/BudgetDatabase/LOG.old
+vector_store/browser_data/Default/Cache/Cache_Data/data_0
+vector_store/browser_data/Default/Cache/Cache_Data/data_1
+vector_store/browser_data/Default/Cache/Cache_Data/data_2
+vector_store/browser_data/Default/Cache/Cache_Data/data_3
+vector_store/browser_data/Default/Cache/Cache_Data/f_000001
+vector_store/browser_data/Default/Cache/Cache_Data/f_000002
+vector_store/browser_data/Default/Cache/Cache_Data/f_000003
+vector_store/browser_data/Default/Cache/Cache_Data/f_000004
+vector_store/browser_data/Default/Cache/Cache_Data/f_000005
+vector_store/browser_data/Default/Cache/Cache_Data/index
+vector_store/browser_data/Default/Cache/No_Vary_Search/journal.baj
+vector_store/browser_data/Default/Cache/No_Vary_Search/snapshot.baf
+vector_store/browser_data/Default/ClientCertificates/LOCK
+vector_store/browser_data/Default/ClientCertificates/LOG
+vector_store/browser_data/Default/ClientCertificates/LOG.old
+vector_store/browser_data/Default/Code Cache/js/0a8c9be8cf3debb8_0
+vector_store/browser_data/Default/Code Cache/js/1ff494a3f47781f1_0
+vector_store/browser_data/Default/Code Cache/js/50e6049982b84706_0
+vector_store/browser_data/Default/Code Cache/js/69fcff2c48782b28_0
+vector_store/browser_data/Default/Code Cache/js/232f021510bb8575_0
+vector_store/browser_data/Default/Code Cache/js/5897e32c785cfee4_0
+vector_store/browser_data/Default/Code Cache/js/8974c36705d33006_0
+vector_store/browser_data/Default/Code Cache/js/52379fd1d9b1a570_0
+vector_store/browser_data/Default/Code Cache/js/84633f7e75f6b9d5_0
+vector_store/browser_data/Default/Code Cache/js/dbe652f8a8f452b6_0
+vector_store/browser_data/Default/Code Cache/js/ef714d784e25e5fd_0
+vector_store/browser_data/Default/Code Cache/js/f0e591337fcc2180_0
+vector_store/browser_data/Default/Code Cache/js/fe8080ef1d308ab8_0
+vector_store/browser_data/Default/Code Cache/js/index
+vector_store/browser_data/Default/Code Cache/js/index-dir/the-real-index
+vector_store/browser_data/Default/Code Cache/wasm/index
+vector_store/browser_data/Default/Code Cache/wasm/index-dir/the-real-index
+vector_store/browser_data/Default/DawnGraphiteCache/data_0
+vector_store/browser_data/Default/DawnGraphiteCache/data_1
+vector_store/browser_data/Default/DawnGraphiteCache/data_2
+vector_store/browser_data/Default/DawnGraphiteCache/data_3
+vector_store/browser_data/Default/DawnGraphiteCache/index
+vector_store/browser_data/Default/DawnWebGPUCache/data_0
+vector_store/browser_data/Default/DawnWebGPUCache/data_1
+vector_store/browser_data/Default/DawnWebGPUCache/data_2
+vector_store/browser_data/Default/DawnWebGPUCache/data_3
+vector_store/browser_data/Default/DawnWebGPUCache/index
+vector_store/browser_data/Default/Extension Rules/CURRENT
+vector_store/browser_data/Default/Extension Rules/LOCK
+vector_store/browser_data/Default/Extension Rules/LOG
+vector_store/browser_data/Default/Extension Rules/MANIFEST-000001
+vector_store/browser_data/Default/Extension Scripts/CURRENT
+vector_store/browser_data/Default/Extension Scripts/LOCK
+vector_store/browser_data/Default/Extension Scripts/LOG
+vector_store/browser_data/Default/Extension Scripts/MANIFEST-000001
+vector_store/browser_data/Default/Extension State/CURRENT
+vector_store/browser_data/Default/Extension State/LOCK
+vector_store/browser_data/Default/Extension State/LOG
+vector_store/browser_data/Default/Extension State/LOG.old
+vector_store/browser_data/Default/Extension State/MANIFEST-000001
+vector_store/browser_data/Default/Feature Engagement Tracker/AvailabilityDB/LOCK
+vector_store/browser_data/Default/Feature Engagement Tracker/AvailabilityDB/LOG
+vector_store/browser_data/Default/Feature Engagement Tracker/AvailabilityDB/LOG.old
+vector_store/browser_data/Default/Feature Engagement Tracker/EventDB/LOCK
+vector_store/browser_data/Default/Feature Engagement Tracker/EventDB/LOG
+vector_store/browser_data/Default/Feature Engagement Tracker/EventDB/LOG.old
+vector_store/browser_data/Default/GCM Store/CURRENT
+vector_store/browser_data/Default/GCM Store/LOCK
+vector_store/browser_data/Default/GCM Store/LOG
+vector_store/browser_data/Default/GCM Store/LOG.old
+vector_store/browser_data/Default/GCM Store/MANIFEST-000001
+vector_store/browser_data/Default/GPUCache/data_0
+vector_store/browser_data/Default/GPUCache/data_1
+vector_store/browser_data/Default/GPUCache/data_2
+vector_store/browser_data/Default/GPUCache/data_3
+vector_store/browser_data/Default/GPUCache/index
+vector_store/browser_data/Default/Local Storage/leveldb/CURRENT
+vector_store/browser_data/Default/Local Storage/leveldb/LOCK
+vector_store/browser_data/Default/Local Storage/leveldb/LOG
+vector_store/browser_data/Default/Local Storage/leveldb/LOG.old
+vector_store/browser_data/Default/Local Storage/leveldb/MANIFEST-000001
+vector_store/browser_data/Default/Network/Cookies
+vector_store/browser_data/Default/Network/Cookies-journal
+vector_store/browser_data/Default/Network/Device Bound Sessions
+vector_store/browser_data/Default/Network/Device Bound Sessions-journal
+vector_store/browser_data/Default/Network/Network Persistent State
+vector_store/browser_data/Default/Network/NetworkDataMigrated
+vector_store/browser_data/Default/Network/Reporting and NEL
+vector_store/browser_data/Default/Network/Reporting and NEL-journal
+vector_store/browser_data/Default/Network/SCT Auditing Pending Reports
+vector_store/browser_data/Default/Network/TransportSecurity
+vector_store/browser_data/Default/Network/Trust Tokens
+vector_store/browser_data/Default/Network/Trust Tokens-journal
+vector_store/browser_data/Default/PersistentOriginTrials/LOCK
+vector_store/browser_data/Default/PersistentOriginTrials/LOG
+vector_store/browser_data/Default/PersistentOriginTrials/LOG.old
+vector_store/browser_data/Default/Safe Browsing Network/NetworkDataMigrated
+vector_store/browser_data/Default/Safe Browsing Network/Safe Browsing Cookies
+vector_store/browser_data/Default/Safe Browsing Network/Safe Browsing Cookies-journal
+vector_store/browser_data/Default/Segmentation Platform/SegmentInfoDB/LOCK
+vector_store/browser_data/Default/Segmentation Platform/SegmentInfoDB/LOG
+vector_store/browser_data/Default/Segmentation Platform/SegmentInfoDB/LOG.old
+vector_store/browser_data/Default/Segmentation Platform/SignalDB/LOCK
+vector_store/browser_data/Default/Segmentation Platform/SignalDB/LOG
+vector_store/browser_data/Default/Segmentation Platform/SignalDB/LOG.old
+vector_store/browser_data/Default/Segmentation Platform/SignalStorageConfigDB/LOCK
+vector_store/browser_data/Default/Segmentation Platform/SignalStorageConfigDB/LOG
+vector_store/browser_data/Default/Segmentation Platform/SignalStorageConfigDB/LOG.old
+vector_store/browser_data/Default/Session Storage/CURRENT
+vector_store/browser_data/Default/Session Storage/LOCK
+vector_store/browser_data/Default/Session Storage/LOG
+vector_store/browser_data/Default/Session Storage/LOG.old
+vector_store/browser_data/Default/Session Storage/MANIFEST-000001
+vector_store/browser_data/Default/Sessions/Session_13423154067922618
+vector_store/browser_data/Default/Sessions/Session_13423154441264397
+vector_store/browser_data/Default/Sessions/Tabs_13423154085756908
+vector_store/browser_data/Default/Sessions/Tabs_13423154441557264
+vector_store/browser_data/Default/Shared Dictionary/db
+vector_store/browser_data/Default/Shared Dictionary/db-journal
+vector_store/browser_data/Default/Shared Dictionary/cache/index
+vector_store/browser_data/Default/Shared Dictionary/cache/index-dir/the-real-index
+vector_store/browser_data/Default/Site Characteristics Database/CURRENT
+vector_store/browser_data/Default/Site Characteristics Database/LOCK
+vector_store/browser_data/Default/Site Characteristics Database/LOG
+vector_store/browser_data/Default/Site Characteristics Database/LOG.old
+vector_store/browser_data/Default/Site Characteristics Database/MANIFEST-000001
+vector_store/browser_data/Default/Sync Data/LevelDB/CURRENT
+vector_store/browser_data/Default/Sync Data/LevelDB/LOCK
+vector_store/browser_data/Default/Sync Data/LevelDB/LOG
+vector_store/browser_data/Default/Sync Data/LevelDB/LOG.old
+vector_store/browser_data/Default/Sync Data/LevelDB/MANIFEST-000001
+vector_store/browser_data/Default/WebStorage/QuotaManager
+vector_store/browser_data/Default/WebStorage/QuotaManager-journal
+vector_store/browser_data/Default/chrome_cart_db/LOCK
+vector_store/browser_data/Default/chrome_cart_db/LOG
+vector_store/browser_data/Default/chrome_cart_db/LOG.old
+vector_store/browser_data/Default/commerce_subscription_db/LOCK
+vector_store/browser_data/Default/commerce_subscription_db/LOG
+vector_store/browser_data/Default/commerce_subscription_db/LOG.old
+vector_store/browser_data/Default/discount_infos_db/LOCK
+vector_store/browser_data/Default/discount_infos_db/LOG
+vector_store/browser_data/Default/discount_infos_db/LOG.old
+vector_store/browser_data/Default/discounts_db/LOCK
+vector_store/browser_data/Default/discounts_db/LOG
+vector_store/browser_data/Default/discounts_db/LOG.old
+vector_store/browser_data/Default/parcel_tracking_db/LOCK
+vector_store/browser_data/Default/parcel_tracking_db/LOG
+vector_store/browser_data/Default/parcel_tracking_db/LOG.old
+vector_store/browser_data/Default/shared_proto_db/CURRENT
+vector_store/browser_data/Default/shared_proto_db/LOCK
+vector_store/browser_data/Default/shared_proto_db/LOG
+vector_store/browser_data/Default/shared_proto_db/LOG.old
+vector_store/browser_data/Default/shared_proto_db/MANIFEST-000001
+vector_store/browser_data/Default/shared_proto_db/metadata/CURRENT
+vector_store/browser_data/Default/shared_proto_db/metadata/LOCK
+vector_store/browser_data/Default/shared_proto_db/metadata/LOG
+vector_store/browser_data/Default/shared_proto_db/metadata/LOG.old
+vector_store/browser_data/Default/shared_proto_db/metadata/MANIFEST-000001
+vector_store/browser_data/GrShaderCache/data_0
+vector_store/browser_data/GrShaderCache/data_1
+vector_store/browser_data/GrShaderCache/data_2
+vector_store/browser_data/GrShaderCache/data_3
+vector_store/browser_data/GrShaderCache/f_000001
+vector_store/browser_data/GrShaderCache/index
+vector_store/browser_data/GraphiteDawnCache/data_0
+vector_store/browser_data/GraphiteDawnCache/data_1
+vector_store/browser_data/GraphiteDawnCache/data_2
+vector_store/browser_data/GraphiteDawnCache/data_3
+vector_store/browser_data/GraphiteDawnCache/index
+vector_store/browser_data/ShaderCache/data_0
+vector_store/browser_data/ShaderCache/data_1
+vector_store/browser_data/ShaderCache/data_2
+vector_store/browser_data/ShaderCache/data_3
+vector_store/browser_data/ShaderCache/index
+vector_store/browser_data/component_crx_cache/metadata.json
+vector_store/browser_data/extensions_crx_cache/metadata.json
+vector_store/browser_data/segmentation_platform/ukm_db
+vector_store/browser_data/segmentation_platform/ukm_db-wal
