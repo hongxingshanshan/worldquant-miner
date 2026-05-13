@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>向量数据库管理</title>
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 25px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+        }
+
+        .header-links a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .header-links a:hover {
+            text-decoration: underline;
+        }
+
+        /* 统计区域 */
+        .stats-section {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .stat-item .label {
+            color: #666;
+            font-size: 13px;
+        }
+
+        .stat-item .value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        /* 筛选区域 */
+        .filter-section {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-group label {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            padding: 6px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+            min-width: 150px;
+        }
+
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        /* 标签页 */
+        .tabs-section {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .tabs-header {
+            display: flex;
+            border-bottom: 1px solid #eee;
+        }
+
+        .tab-btn {
+            padding: 15px 25px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.2s;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab-btn:hover {
+            background: #f5f5f5;
+        }
+
+        .tab-btn.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            background: #f9f9ff;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 20px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* 按钮 */
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* 搜索区域 */
+        .search-section {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+        }
+
+        .search-header {
+            margin-bottom: 15px;
+        }
+
+        .search-header h4 {
+            color: #333;
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+
+        .search-header p {
+            color: #666;
+            font-size: 13px;
+        }
+
+        .search-input-group {
+            display: flex;
+            gap: 15px;
+            align-items: stretch;
+        }
+
+        .search-input-wrapper {
+            flex: 1;
+        }
+
+        .search-input-wrapper label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .search-input-wrapper textarea {
+            width: 100%;
+            min-height: 60px;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        .search-input-wrapper textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 150px;
+        }
+
+        .search-controls .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .search-controls .filter-group label {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .search-controls .filter-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .search-controls .filter-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-controls .btn {
+            width: 100%;
+            padding: 12px;
+        }
+
+        .search-examples {
+            margin-top: 12px;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .search-examples span {
+            color: #667eea;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+
+        .search-examples span:hover {
+            text-decoration: underline;
+        }
+
+        .search-controls-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .search-controls-row .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .search-controls-row .filter-group label {
+            font-size: 13px;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .search-controls-row .filter-group select {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .search-controls-row .filter-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .search-controls-row .btn {
+            padding: 8px 20px;
+        }
+
+        /* 数据表格 */
+        .data-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+        .data-card-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .data-card-header h3 {
+            font-size: 16px;
+            color: #333;
+        }
+
+        .data-table-container {
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .data-table th {
+            background: #f5f5f5;
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            position: sticky;
+            top: 0;
+            border-bottom: 2px solid #ddd;
+            white-space: nowrap;
+        }
+
+        .data-table td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            vertical-align: top;
+        }
+
+        .data-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        /* 标签样式 */
+        .label {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-right: 4px;
+        }
+
+        .label-info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .label-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .label-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .label-default {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        /* 相似度 */
+        .similarity-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .similarity-high {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .similarity-medium {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .similarity-low {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        /* 内容预览 */
+        .content-preview {
+            max-width: 400px;
+            max-height: 80px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 12px;
+            color: #555;
+            line-height: 1.4;
+        }
+
+        /* 详情弹窗 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .modal.show {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 900px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            font-size: 18px;
+            color: #333;
+        }
+
+        .modal-close {
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .detail-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .detail-section h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 14px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 5px;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 12px;
+        }
+
+        .detail-label {
+            color: #666;
+        }
+
+        .detail-value {
+            font-weight: 500;
+            color: #333;
+            text-align: right;
+            max-width: 70%;
+            word-break: break-word;
+        }
+
+        .content-box {
+            background: #1e1e1e;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* 分页区域 */
+        .pagination-section {
+            padding: 15px 20px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .pagination-info {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .pagination-buttons {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .page-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .page-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        /* 加载状态 */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-list {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        /* 旋转动画 */
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .spinning {
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .filter-section {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .data-table {
+                font-size: 11px;
+            }
+
+            .data-table th, .data-table td {
+                padding: 8px 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>🗄️ 向量数据库管理</h1>
+            </div>
+            <div class="header-links">
+                <a href="/">← 返回仪表盘</a>
+            </div>
+        </div>
+
+        <!-- 统计区域 -->
+        <div class="stats-section">
+            <div class="stat-item">
+                <span class="label">📦 集合名称:</span>
+                <span class="value" id="collectionName">-</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">📊 总记录数:</span>
+                <span class="value" id="totalCount">-</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">📁 数据库路径:</span>
+                <span class="value" id="dbPath" style="font-size: 14px;">-</span>
+            </div>
+            <div class="stat-item">
+                <span class="label">🧠 嵌入模型:</span>
+                <span class="value" id="modelName" style="font-size: 14px;">-</span>
+            </div>
+        </div>
+
+        <!-- 标签页 -->
+        <div class="tabs-section">
+            <div class="tabs-header">
+                <button class="tab-btn active" onclick="switchTab('browse')">📋 数据浏览</button>
+                <button class="tab-btn" onclick="switchTab('filter')">🔍 条件查询</button>
+                <button class="tab-btn" onclick="switchTab('search')">🔎 语义搜索</button>
+            </div>
+
+            <!-- 数据浏览 -->
+            <div id="tab-browse" class="tab-content active">
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label>显示数量:</label>
+                        <select id="browseLimit">
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="browseData()">
+                        <span>📋</span> 浏览数据
+                    </button>
+                </div>
+            </div>
+
+            <!-- 条件查询 -->
+            <div id="tab-filter" class="tab-content">
+                <div class="filter-section">
+                    <div class="filter-group">
+                        <label>层级 (layer):</label>
+                        <select id="filterLayer">
+                            <option value="">全部</option>
+                            <option value="community_knowledge">community_knowledge</option>
+                            <option value="technical_methods">technical_methods</option>
+                            <option value="basic_concepts">basic_concepts</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>分类 (category):</label>
+                        <select id="filterCategory">
+                            <option value="">全部</option>
+                            <option value="forum_post">forum_post</option>
+                            <option value="general">general</option>
+                            <option value="data_fields">data_fields</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>显示数量:</label>
+                        <select id="filterLimit">
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="filterData()">
+                        <span>🔍</span> 条件查询
+                    </button>
+                </div>
+            </div>
+
+            <!-- 语义搜索 -->
+            <div id="tab-search" class="tab-content">
+                <div class="search-section">
+                    <div class="search-header">
+                        <h4>🔎 语义搜索</h4>
+                        <p>输入关键词，通过向量相似度搜索相关知识内容（支持中英文）</p>
+                    </div>
+                    <div class="search-input-wrapper">
+                        <label>搜索内容:</label>
+                        <textarea id="searchQuery" placeholder="输入搜索关键词..."></textarea>
+                    </div>
+                    <div class="search-examples">
+                        <strong>示例:</strong>
+                        <span onclick="setSearchQuery('如何提高 Sharpe 比率')">如何提高 Sharpe 比率</span>
+                        <span onclick="setSearchQuery('overfitting problem')">overfitting problem</span>
+                        <span onclick="setSearchQuery('数据清洗方法')">数据清洗方法</span>
+                        <span onclick="setSearchQuery('换手率优化')">换手率优化</span>
+                    </div>
+                    <div class="search-controls-row">
+                        <div class="filter-group">
+                            <label>返回数量:</label>
+                            <select id="searchLimit">
+                                <option value="5">5 条</option>
+                                <option value="10">10 条</option>
+                                <option value="20">20 条</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-success" onclick="semanticSearch()">
+                            <span>🔎</span> 搜索
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 结果区域 -->
+        <div class="data-card">
+            <div class="data-card-header">
+                <h3>📊 查询结果</h3>
+                <span id="resultInfo">-</span>
+            </div>
+            <div class="data-table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>相似度</th>
+                            <th>层级</th>
+                            <th>分类</th>
+                            <th>类型</th>
+                            <th>来源</th>
+                            <th>内容预览</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dataTableBody">
+                        <tr>
+                            <td colspan="8" class="loading">请选择查询方式</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 分页区域 -->
+            <div class="pagination-section" id="paginationSection" style="display: none;">
+                <div class="pagination-info">
+                    共 <span id="pageTotalCount">0</span> 条，
+                    第 <span id="currentPage">1</span> / <span id="totalPages">1</span> 页
+                </div>
+                <div class="pagination-buttons">
+                    <button class="page-btn" onclick="goToPage(1)" id="firstPageBtn">首页</button>
+                    <button class="page-btn" onclick="goToPage(currentPageNum - 1)" id="prevPageBtn">上一页</button>
+                    <button class="page-btn" onclick="goToPage(currentPageNum + 1)" id="nextPageBtn">下一页</button>
+                    <button class="page-btn" onclick="goToPage(totalPagesNum)" id="lastPageBtn">末页</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详情弹窗 -->
+    <div class="modal" id="detailModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📄 知识块详情</h3>
+                <span class="modal-close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="modalBody">
+                加载中...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局状态
+        let currentPageNum = 1;
+        let totalPagesNum = 1;
+        let currentResults = [];
+        let isSearchMode = false;
+
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStats();
+        });
+
+        // 加载统计信息
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/vector/stats');
+                const data = await response.json();
+
+                document.getElementById('collectionName').textContent = data.collection || '-';
+                document.getElementById('totalCount').textContent = data.count || '-';
+                document.getElementById('dbPath').textContent = data.path || '-';
+                document.getElementById('modelName').textContent = data.model || '-';
+            } catch (error) {
+                console.error('获取统计信息失败:', error);
+            }
+        }
+
+        // 切换标签页
+        function switchTab(tabName) {
+            // 更新按钮状态
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+
+            // 隐藏分页
+            document.getElementById('paginationSection').style.display = 'none';
+            isSearchMode = false;
+        }
+
+        // 浏览数据
+        async function browseData() {
+            const limit = parseInt(document.getElementById('browseLimit').value);
+            isSearchMode = false;
+
+            showLoading();
+
+            try {
+                const response = await fetch(`/api/vector/browse?limit=${limit}`);
+                const data = await response.json();
+
+                currentResults = data.results || [];
+                displayResults(currentResults, false);
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        // 条件查询
+        async function filterData() {
+            const layer = document.getElementById('filterLayer').value;
+            const category = document.getElementById('filterCategory').value;
+            const limit = parseInt(document.getElementById('filterLimit').value);
+
+            isSearchMode = false;
+
+            showLoading();
+
+            try {
+                let url = `/api/vector/filter?limit=${limit}`;
+                if (layer) url += `&layer=${layer}`;
+                if (category) url += `&category=${category}`;
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                currentResults = data.results || [];
+                displayResults(currentResults, false);
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        // 语义搜索
+        async function semanticSearch() {
+            const query = document.getElementById('searchQuery').value.trim();
+            const limit = parseInt(document.getElementById('searchLimit').value);
+
+            if (!query) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: '请输入搜索内容'
+                });
+                return;
+            }
+
+            isSearchMode = true;
+            showLoading();
+
+            try {
+                const response = await fetch('/api/vector/search', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({query, limit})
+                });
+                const data = await response.json();
+
+                currentResults = data.results || [];
+                displayResults(currentResults, true);
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        // 显示加载中
+        function showLoading() {
+            const tbody = document.getElementById('dataTableBody');
+            tbody.innerHTML = '<tr><td colspan="8" class="loading"><span class="spinning">🔄</span> 加载中...</td></tr>';
+        }
+
+        // 显示错误
+        function showError(error) {
+            const tbody = document.getElementById('dataTableBody');
+            tbody.innerHTML = `<tr><td colspan="8" class="empty-list">加载失败: ${error}</td></tr>`;
+        }
+
+        // 显示结果
+        function displayResults(results, showSimilarity) {
+            const tbody = document.getElementById('dataTableBody');
+            const resultInfo = document.getElementById('resultInfo');
+
+            if (!results || results.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-list">没有找到数据</td></tr>';
+                resultInfo.textContent = '无结果';
+                document.getElementById('paginationSection').style.display = 'none';
+                return;
+            }
+
+            resultInfo.textContent = `共 ${results.length} 条记录`;
+
+            let html = '';
+            results.forEach((item, i) => {
+                const meta = item.metadata || {};
+                const similarity = item.similarity || 0;
+
+                // 相似度样式
+                let simClass = 'similarity-low';
+                if (similarity >= 0.7) simClass = 'similarity-high';
+                else if (similarity >= 0.5) simClass = 'similarity-medium';
+
+                const simBadge = showSimilarity
+                    ? `<span class="similarity-badge ${simClass}">${(similarity * 100).toFixed(1)}%</span>`
+                    : '-';
+
+                // 内容预览
+                const content = item.document || '';
+                const preview = content.length > 100 ? content.substring(0, 100) + '...' : content;
+
+                html += `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>${simBadge}</td>
+                        <td><span class="label label-info">${meta.layer || '-'}</span></td>
+                        <td><span class="label label-default">${meta.category || '-'}</span></td>
+                        <td><span class="label label-warning">${meta.type || '-'}</span></td>
+                        <td style="font-size: 11px;">${escapeHtml(meta.post_title || meta.source || '-')}</td>
+                        <td><div class="content-preview">${escapeHtml(preview)}</div></td>
+                        <td>
+                            <button class="btn btn-secondary" onclick="showDetail(${i})" style="padding: 4px 10px; font-size: 11px;">
+                                详情
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+            document.getElementById('paginationSection').style.display = 'none';
+        }
+
+        // 显示详情
+        function showDetail(index) {
+            const item = currentResults[index];
+            if (!item) return;
+
+            const meta = item.metadata || {};
+            const modalBody = document.getElementById('modalBody');
+
+            let html = `
+                <div class="detail-grid">
+                    <div class="detail-section">
+                        <h4>📋 元数据</h4>
+                        <div class="detail-item">
+                            <span class="detail-label">ID</span>
+                            <span class="detail-value">${item.id || '-'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">层级</span>
+                            <span class="detail-value">${meta.layer || '-'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">分类</span>
+                            <span class="detail-value">${meta.category || '-'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">类型</span>
+                            <span class="detail-value">${meta.type || '-'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">来源</span>
+                            <span class="detail-value">${meta.post_title || meta.source || '-'}</span>
+                        </div>
+            `;
+
+            if (item.similarity) {
+                html += `
+                        <div class="detail-item">
+                            <span class="detail-label">相似度</span>
+                            <span class="detail-value">${(item.similarity * 100).toFixed(2)}%</span>
+                        </div>
+                `;
+            }
+
+            html += `
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h4>📝 内容</h4>
+                    <div class="content-box">${escapeHtml(item.document || '-')}</div>
+                </div>
+            `;
+
+            modalBody.innerHTML = html;
+            document.getElementById('detailModal').classList.add('show');
+        }
+
+        // 关闭弹窗
+        function closeModal() {
+            document.getElementById('detailModal').classList.remove('show');
+        }
+
+        // 点击弹窗外部关闭
+        document.getElementById('detailModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+
+        // ESC 关闭弹窗
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        // HTML 转义
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 设置搜索框内容（点击示例）
+        function setSearchQuery(query) {
+            document.getElementById('searchQuery').value = query;
+        }
+
+        // 分页相关（预留）
+        function goToPage(page) {
+            // 分页逻辑预留
+        }
+    </script>
+</body>
+</html>

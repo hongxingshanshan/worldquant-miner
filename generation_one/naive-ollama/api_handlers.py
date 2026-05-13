@@ -3,7 +3,32 @@ Web Dashboard API 处理函数
 
 从 web_dashboard.py 拆分出来，包含所有 Flask 路由处理函数
 """
+import sys
+import os
+from pathlib import Path
 from flask import request, jsonify, render_template
+
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+# 向量数据库相关导入
+try:
+    import chromadb
+    from vector_store import EmbeddingModel
+    VECTOR_DB_AVAILABLE = True
+    VECTOR_DB_PATH = project_root / 'vector_store' / 'chroma_db'
+    vector_embedder = None
+except ImportError:
+    VECTOR_DB_AVAILABLE = False
+
+
+def get_vector_embedder():
+    """获取向量嵌入模型（延迟初始化）"""
+    global vector_embedder
+    if vector_embedder is None and VECTOR_DB_AVAILABLE:
+        vector_embedder = EmbeddingModel()
+    return vector_embedder
 
 
 def register_api_routes(app, dashboard):
@@ -140,3 +165,135 @@ def register_api_routes(app, dashboard):
     def alpha_db_page():
         """Alpha database management page."""
         return render_template('alpha_db.html')
+
+    # ==================== 向量数据库相关 API ====================
+
+    @app.route('/vector-db')
+    def vector_db_page():
+        """向量数据库管理页面"""
+        return render_template('vector_db.html')
+
+    @app.route('/api/vector/stats')
+    def api_vector_stats():
+        """向量数据库统计信息"""
+        if not VECTOR_DB_AVAILABLE:
+            return jsonify({'error': '向量数据库不可用'}), 500
+
+        try:
+            client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
+            collection = client.get_collection('knowledge_chunks')
+            return jsonify({
+                'collection': collection.name,
+                'count': collection.count(),
+                'path': str(VECTOR_DB_PATH),
+                'model': 'paraphrase-multilingual-MiniLM-L12-v2'
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/vector/browse')
+    def api_vector_browse():
+        """浏览向量数据库数据"""
+        if not VECTOR_DB_AVAILABLE:
+            return jsonify({'error': '向量数据库不可用'}), 500
+
+        try:
+            limit = int(request.args.get('limit', 10))
+            client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
+            collection = client.get_collection('knowledge_chunks')
+
+            result = collection.get(limit=limit, include=['documents', 'metadatas'])
+
+            results = []
+            for i in range(len(result['ids'])):
+                results.append({
+                    'id': result['ids'][i],
+                    'document': result['documents'][i] if result['documents'] else '',
+                    'metadata': result['metadatas'][i] if result['metadatas'] else {}
+                })
+
+            return jsonify({'count': len(results), 'results': results})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/vector/filter')
+    def api_vector_filter():
+        """条件查询向量数据库"""
+        if not VECTOR_DB_AVAILABLE:
+            return jsonify({'error': '向量数据库不可用'}), 500
+
+        try:
+            limit = int(request.args.get('limit', 10))
+            layer = request.args.get('layer', '')
+            category = request.args.get('category', '')
+
+            client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
+            collection = client.get_collection('knowledge_chunks')
+
+            where_filter = {}
+            if layer:
+                where_filter['layer'] = layer
+            if category:
+                where_filter['category'] = category
+
+            result = collection.get(
+                where=where_filter if where_filter else None,
+                limit=limit,
+                include=['documents', 'metadatas']
+            )
+
+            results = []
+            for i in range(len(result['ids'])):
+                results.append({
+                    'id': result['ids'][i],
+                    'document': result['documents'][i] if result['documents'] else '',
+                    'metadata': result['metadatas'][i] if result['metadatas'] else {}
+                })
+
+            return jsonify({'count': len(results), 'results': results})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/vector/search', methods=['POST'])
+    def api_vector_search():
+        """语义搜索向量数据库"""
+        if not VECTOR_DB_AVAILABLE:
+            return jsonify({'error': '向量数据库不可用'}), 500
+
+        try:
+            data = request.json
+            query = data.get('query', '')
+            limit = int(data.get('limit', 5))
+
+            if not query:
+                return jsonify({'error': '查询内容不能为空'}), 400
+
+            client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
+            collection = client.get_collection('knowledge_chunks')
+
+            # 生成查询向量
+            emb = get_vector_embedder()
+            query_embedding = emb.embed_query(query)
+
+            result = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=limit,
+                include=['documents', 'metadatas', 'distances']
+            )
+
+            results = []
+            if result['documents'] and result['documents'][0]:
+                for i in range(len(result['ids'][0])):
+                    distance = result['distances'][0][i] if result['distances'] else 0
+                    similarity = max(0, 1 - distance / 2)
+                    results.append({
+                        'id': result['ids'][0][i],
+                        'document': result['documents'][0][i] if result['documents'] else '',
+                        'metadata': result['metadatas'][0][i] if result['metadatas'] else {},
+                        'distance': distance,
+                        'similarity': similarity
+                    })
+
+            return jsonify({'count': len(results), 'results': results})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500

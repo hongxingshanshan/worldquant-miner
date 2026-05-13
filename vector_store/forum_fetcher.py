@@ -842,6 +842,172 @@ class ForumFetcher:
 
         return len(chunks)
 
+    def fetch_batch_efficient(self, urls: List[str], force: bool = False) -> List[Dict]:
+        """
+        高效批量采集帖子（复用浏览器会话）
+
+        使用单个 Playwright 浏览器会话采集多个帖子，
+        避免每次采集都启动新浏览器，大幅提升效率。
+
+        Args:
+            urls: URL 列表
+            force: 是否强制重新采集
+
+        Returns:
+            采集结果列表
+        """
+        if not PLAYWRIGHT_AVAILABLE:
+            print("Playwright 未安装，使用普通批量采集")
+            return self.fetch_batch(urls, force=force)
+
+        results = []
+        total = len(urls)
+
+        # 过滤已采集的 URL
+        pending_urls = []
+        for url in urls:
+            if force or url not in self.fetch_history:
+                pending_urls.append(url)
+            else:
+                results.append({'url': url, 'status': 'skipped', 'reason': 'already_fetched'})
+
+        if not pending_urls:
+            print("所有帖子已采集完成")
+            return results
+
+        print(f"高效批量采集: {len(pending_urls)} 个帖子（复用浏览器）")
+
+        # 获取登录凭证
+        email, password = None, None
+        if self.login_credentials:
+            email, password = self.login_credentials
+        elif self.auto_login:
+            cred_file = os.path.join(
+                os.path.dirname(__file__),
+                '..',
+                'generation_one',
+                'naive-ollama',
+                'credential.txt'
+            )
+            if os.path.exists(cred_file):
+                try:
+                    with open(cred_file, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        if content.startswith('['):
+                            creds = json.loads(content)
+                            email, password = creds[0], creds[1]
+                except Exception:
+                    pass
+
+        try:
+            with sync_playwright() as p:
+                # 启动浏览器（复用）
+                browser = p.chromium.launch(headless=False)
+                context = browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                )
+                page = context.new_page()
+
+                # 采集每个帖子
+                for i, url in enumerate(pending_urls, 1):
+                    print(f"[{i}/{len(pending_urls)}] 采集: {url}")
+
+                    try:
+                        page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                        page.wait_for_timeout(1000)
+
+                        # 检查是否需要登录
+                        current_url = page.url.lower()
+                        if ('sign-in' in current_url or 'login' in current_url) and email and password:
+                            print("需要登录...")
+                            self._do_login(page, email, password)
+                            page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                            page.wait_for_timeout(1000)
+
+                        # 提取内容
+                        js_result = page.evaluate('''() => {
+                            const result = {
+                                title: '',
+                                content: '',
+                                author: '',
+                                date: ''
+                            };
+
+                            const h1 = document.querySelector('article h1');
+                            if (h1) result.title = h1.innerText.trim();
+
+                            const authorLink = document.querySelector('article a[href*="/profiles/"]');
+                            if (authorLink) result.author = authorLink.innerText.trim();
+
+                            const timeElem = document.querySelector('article time');
+                            if (timeElem) result.date = timeElem.innerText.trim();
+
+                            const article = document.querySelector('article');
+                            if (article) {
+                                const contentParts = [];
+                                const elements = article.querySelectorAll('h4, p, pre');
+                                for (const el of elements) {
+                                    const text = el.innerText.trim();
+                                    if (text && text.length > 5 && !text.includes('Related to:') && !text.includes('comments')) {
+                                        contentParts.push(text);
+                                    }
+                                }
+                                result.content = contentParts.join('\\n\\n');
+                            }
+
+                            return result;
+                        }''')
+
+                        js_result['url'] = url
+                        js_result['source'] = 'playwright_batch'
+
+                        if js_result.get('content') and len(js_result['content']) > 50:
+                            # 保存 JSON
+                            self._save_post_json(js_result)
+
+                            # 入库到向量数据库
+                            chunk_count = self._ingest_post(js_result)
+
+                            # 更新历史
+                            self.fetch_history[url] = {
+                                'title': js_result.get('title', ''),
+                                'fetched_at': datetime.now().isoformat(),
+                                'chunk_count': chunk_count,
+                                'extracted': self.use_llm_extract,
+                                'method': 'playwright_batch'
+                            }
+                            self._save_fetch_history()
+
+                            results.append(js_result)
+                            print(f"  成功: {js_result.get('title', '')[:40]}... ({chunk_count} 块)")
+                        else:
+                            results.append({'url': url, 'error': '内容不足'})
+                            print(f"  失败: 内容不足")
+
+                    except Exception as e:
+                        results.append({'url': url, 'error': str(e)})
+                        print(f"  错误: {e}")
+
+                    # 避免请求过快
+                    if i < len(pending_urls):
+                        time.sleep(1)
+
+                browser.close()
+
+        except Exception as e:
+            print(f"浏览器启动失败: {e}")
+            # 回退到普通批量采集
+            return self.fetch_batch(urls, force=force)
+
+        # 统计
+        success_count = sum(1 for r in results if not r.get('error') and r.get('status') != 'skipped')
+        skip_count = sum(1 for r in results if r.get('status') == 'skipped')
+        error_count = sum(1 for r in results if r.get('error'))
+
+        print(f"\n批量采集完成: 成功 {success_count}, 跳过 {skip_count}, 失败 {error_count}")
+
+        return results
+
     def fetch_batch(self, urls: List[str], force: bool = False) -> List[Dict]:
         """
         批量采集帖子
@@ -853,6 +1019,10 @@ class ForumFetcher:
         Returns:
             采集结果列表
         """
+        # 如果使用 playwright_mcp 方式，使用高效批量采集
+        if self.fetch_method == self.METHOD_PLAYWRIGHT_MCP:
+            return self.fetch_batch_efficient(urls, force=force)
+
         results = []
         total = len(urls)
 
