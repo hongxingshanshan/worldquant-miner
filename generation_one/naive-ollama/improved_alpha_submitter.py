@@ -16,25 +16,25 @@ try:
 except ImportError:
     logger = logging.getLogger(__name__)
 
+# 导入统一 Session 管理器
+import sys
+import os
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+from common.wq_session_manager import get_wq_session_manager
+
 class ImprovedAlphaSubmitter:
     def __init__(self, credentials_path: str):
-        self.sess = requests.Session()
-        # Set longer timeout for all requests
-        self.sess.timeout = (30, 300)  # (connect_timeout, read_timeout)
-        self.setup_auth(credentials_path)
-        
-    def setup_auth(self, credentials_path: str) -> None:
-        """Set up authentication with WorldQuant Brain."""
-        with open(credentials_path) as f:
-            credentials = json.load(f)
-        
-        username, password = credentials
-        self.sess.auth = HTTPBasicAuth(username, password)
-        
-        response = self.sess.post('https://api.worldquantbrain.com/authentication')
-        if response.status_code != 201:
-            raise Exception(f"Authentication failed: {response.text}")
-        logger.info("Successfully authenticated with WorldQuant Brain")
+        self.credentials_path = credentials_path
+        self.timeout = (30, 300)  # (connect_timeout, read_timeout)
+
+        # 使用统一 Session 管理器
+        self._session_manager = get_wq_session_manager(credentials_path)
+        self.sess = self._session_manager.get_session()
+        if self.sess is None:
+            raise Exception("无法通过统一 Session 管理器认证 WorldQuant Brain")
+        logger.info("使用统一 Session 管理器认证成功")
 
     def check_hopeful_alphas_count(self, min_count: int = 50) -> bool:
         """Check if there are enough hopeful alphas to start submission."""

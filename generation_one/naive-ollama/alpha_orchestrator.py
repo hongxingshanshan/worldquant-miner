@@ -38,6 +38,14 @@ try:
 except ImportError:
     MODEL_FLEET_AVAILABLE = False
 
+# 导入统一 Session 管理器
+import sys
+import os
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+from common.wq_session_manager import get_wq_session_manager
+
 # 使用统一日志配置（多进程安全）
 try:
     from logging_config import get_logger, setup_mp_logging, shutdown_mp_logging
@@ -55,12 +63,18 @@ if not MODEL_FLEET_AVAILABLE:
 class AlphaOrchestrator:
     def __init__(self, credentials_path: str, ollama_url: str = "http://localhost:11434",
                  config_path: Optional[str] = None, model_override: Optional[str] = None):
-        self.sess = requests.Session()
         self.credentials_path = credentials_path
         self.ollama_url = ollama_url
         self.config_path = config_path
         self.model_override = model_override
-        self.setup_auth(credentials_path)
+
+        # 使用统一 Session 管理器
+        self._session_manager = get_wq_session_manager(credentials_path)
+        self.sess = self._session_manager.get_session()
+        if self.sess is None:
+            raise Exception("无法通过统一 Session 管理器认证 WorldQuant Brain")
+        logger.info("使用统一 Session 管理器认证成功")
+
         self.last_submission_date = None
         self.submission_log_file = "submission_log.json"
         self.load_submission_history()
@@ -197,23 +211,6 @@ class AlphaOrchestrator:
 
         self._child_processes.clear()
         logger.info("所有子进程已清理")
-
-    def setup_auth(self, credentials_path: str) -> None:
-        """Set up authentication with WorldQuant Brain."""
-        logger.info(f"Loading credentials from {credentials_path}")
-        with open(credentials_path) as f:
-            credentials = json.load(f)
-        
-        username, password = credentials
-        self.sess.auth = HTTPBasicAuth(username, password)
-        
-        logger.info("Authenticating with WorldQuant Brain...")
-        response = self.sess.post('https://api.worldquantbrain.com/authentication')
-        logger.info(f"Authentication response status: {response.status_code}")
-        
-        if response.status_code != 201:
-            raise Exception(f"Authentication failed: {response.text}")
-        logger.info("Authentication successful")
 
     def load_submission_history(self):
         """Load submission history to track daily submissions."""

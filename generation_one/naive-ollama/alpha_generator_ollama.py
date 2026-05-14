@@ -60,6 +60,14 @@ try:
 except ImportError:
     ALPHA_SIMULATOR_AVAILABLE = False
 
+# 导入统一 Session 管理器
+import sys
+import os
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+from common.wq_session_manager import get_wq_session_manager
+
 # 使用统一日志配置
 try:
     from logging_config import get_logger
@@ -76,10 +84,16 @@ SUBMITTED_ALPHAS_CACHE = "submitted_alphas_cache.json"
 
 class AlphaGenerator:
     def __init__(self, credentials_path: str = "credential.txt", ollama_url: str = "http://localhost:11434", max_concurrent: int = 2, config_path: str = "config.json"):
-        self.sess = requests.Session()
-        self.credentials_path = credentials_path  # Store path for reauth
-        self.setup_auth(credentials_path)
+        self.credentials_path = credentials_path
         self.ollama_url = ollama_url
+
+        # 使用统一 Session 管理器
+        self._session_manager = get_wq_session_manager(credentials_path)
+        self.sess = self._session_manager.get_session()
+        if self.sess is None:
+            raise Exception("无法通过统一 Session 管理器认证 WorldQuant Brain")
+        logger.info("使用统一 Session 管理器认证成功")
+
         self.results = []
         self.pending_results = {}
         self.retry_queue = RetryQueue(self)
@@ -177,24 +191,6 @@ class AlphaGenerator:
 
         self.optimization_enabled = self.optimization_config.get('enabled', True)
         logger.info(f"优化配置: {self.optimization_config}")
-
-        
-    def setup_auth(self, credentials_path: str) -> None:
-        """Set up authentication with WorldQuant Brain."""
-        logger.info(f"Loading credentials from {credentials_path}")
-        with open(credentials_path) as f:
-            credentials = json.load(f)
-        
-        username, password = credentials
-        self.sess.auth = HTTPBasicAuth(username, password)
-        
-        logger.info("Authenticating with WorldQuant Brain...")
-        response = self.sess.post('https://api.worldquantbrain.com/authentication', timeout=30)
-        logger.info(f"Authentication response status: {response.status_code}")
-        logger.debug(f"Authentication response: {response.text[:500]}...")
-        
-        if response.status_code != 201:
-            raise Exception(f"Authentication failed: {response.text}")
 
     def start_consumer_thread(self, check_interval: int = 5, batch_size: int = 10):
         """启动消费者线程

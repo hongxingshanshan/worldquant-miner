@@ -30,6 +30,14 @@ except ImportError as e:
 # 导入 API 处理函数
 from api_handlers import register_api_routes
 
+# 导入统一 Session 管理器
+import sys
+import os
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+from common.wq_session_manager import get_wq_session_manager
+
 app = Flask(__name__)
 
 # Web Dashboard 不写入日志，只读取日志进行监控
@@ -205,25 +213,19 @@ class AlphaDashboard:
             logger.warning(f"Could not get orchestrator status: {e}")
 
         return status
-    
+
     def get_worldquant_status(self) -> Dict:
         """Check WorldQuant Brain API status."""
         try:
-            if os.path.exists("credential.txt"):
-                with open("credential.txt", 'r') as f:
-                    credentials = json.load(f)
-                
-                session = requests.Session()
-                session.auth = (credentials[0], credentials[1])
-                response = session.post('https://api.worldquantbrain.com/authentication', timeout=10)
-                
-                if response.status_code == 201:
-                    return {"status": "connected", "message": "Authentication successful"}
-                else:
-                    return {"status": "auth_failed", "message": f"Status: {response.status_code}"}
+            # 使用统一 Session 管理器
+            sess = self._get_wq_session()
+            if sess is not None:
+                return {"status": "connected", "message": "Authentication successful"}
+            else:
+                return {"status": "auth_failed", "message": "Authentication failed"}
         except Exception as e:
             logger.warning(f"Could not check WorldQuant status: {e}")
-        
+
         return {"status": "unknown", "message": "Could not verify connection"}
     
     def get_recent_activity(self) -> List[Dict]:
@@ -423,32 +425,11 @@ class AlphaDashboard:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _get_wq_session(self) -> Optional[requests.Session]:
-        """获取 WorldQuant Brain API 会话"""
-        if self.sess is not None:
-            return self.sess
-
-        try:
-            if os.path.exists(self.credentials_path):
-                with open(self.credentials_path, 'r') as f:
-                    credentials = json.load(f)
-
-                self.sess = requests.Session()
-                # 禁用代理，直接连接 WorldQuant API
-                self.sess.trust_env = False
-                self.sess.auth = HTTPBasicAuth(credentials[0], credentials[1])
-                response = self.sess.post('https://api.worldquantbrain.com/authentication', timeout=10)
-
-                if response.status_code == 201:
-                    logger.info("WorldQuant API 认证成功")
-                    return self.sess
-                else:
-                    logger.warning(f"WorldQuant API 认证失败: {response.status_code}")
-                    self.sess = None
-        except Exception as e:
-            logger.warning(f"获取 WorldQuant 会话失败: {e}")
-            self.sess = None
-
+    def _get_wq_session(self, force_reauth: bool = False) -> Optional[requests.Session]:
+        """获取 WorldQuant Brain API 会话，使用统一 Session 管理器"""
+        if not hasattr(self, '_session_manager'):
+            self._session_manager = get_wq_session_manager(self.credentials_path)
+        self.sess = self._session_manager.get_session(force_reauth)
         return self.sess
 
     def get_simulation_status(self, sim_id: str) -> Dict:

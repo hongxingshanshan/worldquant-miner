@@ -31,6 +31,14 @@ except ImportError:
     import logging
     logger = logging.getLogger(__name__)
 
+# 导入统一 Session 管理器
+import sys
+import os
+_project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+from common.wq_session_manager import get_wq_session_manager
+
 
 class AlphaExpressionMiner:
     """Alpha 表达式挖掘器
@@ -43,27 +51,15 @@ class AlphaExpressionMiner:
 
     def __init__(self, credentials_path: str):
         logger.info("初始化 AlphaExpressionMiner")
-        self.sess = requests.Session()
-        self.setup_auth(credentials_path)
+        self.credentials_path = credentials_path
         self.simulated_file = 'simulated_expressions.json'
 
-    def setup_auth(self, credentials_path: str) -> None:
-        """设置 WorldQuant Brain 认证"""
-        logger.info(f"从 {credentials_path} 加载凭证")
-        with open(credentials_path) as f:
-            credentials = json.load(f)
-
-        username, password = credentials
-        self.sess.auth = HTTPBasicAuth(username, password)
-
-        logger.info("正在连接 WorldQuant Brain...")
-        response = self.sess.post('https://api.worldquantbrain.com/authentication')
-        logger.info(f"认证响应状态: {response.status_code}")
-
-        if response.status_code != 201:
-            logger.error(f"认证失败: {response.text}")
-            raise Exception(f"认证失败: {response.text}")
-        logger.info("认证成功")
+        # 使用统一 Session 管理器
+        self._session_manager = get_wq_session_manager(credentials_path)
+        self.sess = self._session_manager.get_session()
+        if self.sess is None:
+            raise Exception("无法通过统一 Session 管理器认证 WorldQuant Brain")
+        logger.info("使用统一 Session 管理器认证成功")
 
     def _is_already_simulated(self, expression: str) -> bool:
         """检查表达式是否已经模拟过"""

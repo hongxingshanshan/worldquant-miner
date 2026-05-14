@@ -51,6 +51,9 @@ except ImportError:
     import logging
     logger = logging.getLogger(__name__)
 
+# 导入统一 Session 管理器
+from .wq_session_manager import get_wq_session_manager
+
 
 # API 配置
 DEFAULT_BASE_URL = "https://api.worldquantbrain.com"
@@ -77,11 +80,17 @@ def with_retry(max_retries: int = None, retry_delay: int = None):
             last_error = None
             for attempt in range(retries + 1):
                 try:
+                    # 确保 session 有效
+                    if hasattr(self, '_ensure_valid_session'):
+                        self._ensure_valid_session()
                     return func(self, *args, **kwargs)
                 except WQAuthError as e:
                     if attempt < retries:
                         logger.warning(f"认证过期，重新登录 (尝试 {attempt + 1}/{retries})")
-                        self._authenticate()
+                        if hasattr(self, '_ensure_valid_session'):
+                            self._ensure_valid_session()
+                        else:
+                            self._authenticate()
                         continue
                     raise
                 except WQRateLimitError as e:
@@ -158,6 +167,9 @@ class WorldQuantBrainAPIClient:
         # 加载凭证
         if credentials_path:
             username, password = self._load_credentials(credentials_path)
+            self.credentials_path = credentials_path
+        else:
+            self.credentials_path = None
 
         if not username or not password:
             raise WQAuthError("需要提供用户名和密码，或指定凭证文件路径")
@@ -165,9 +177,12 @@ class WorldQuantBrainAPIClient:
         self.username = username
         self.password = password
 
-        # 初始化会话
-        self.session: Optional[requests.Session] = None
-        self._authenticate()
+        # 使用统一 Session 管理器
+        self._session_manager = get_wq_session_manager(self.credentials_path)
+        self.session = self._session_manager.get_session()
+        if self.session is None:
+            raise WQAuthError("无法通过统一 Session 管理器认证 WorldQuant Brain")
+        logger.info("使用统一 Session 管理器认证成功")
 
     @classmethod
     def from_credentials(cls, credentials_path: str, **kwargs) -> 'WorldQuantBrainAPIClient':
@@ -202,28 +217,9 @@ class WorldQuantBrainAPIClient:
         else:
             raise WQAuthError("凭证文件格式错误，应为 JSON 数组或用户名密码分行")
 
-    def _authenticate(self) -> None:
-        """认证并初始化会话"""
-        logger.info("正在连接 WorldQuant Brain...")
-
-        self.session = requests.Session()
-        self.session.auth = HTTPBasicAuth(self.username, self.password)
-        self.session.headers.update({
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        })
-
-        response = self.session.post(
-            f'{self.base_url}/authentication',
-            timeout=self.timeout
-        )
-
-        if response.status_code == 401:
-            raise WQAuthError("认证失败：用户名或密码错误")
-        elif response.status_code not in [200, 201]:
-            raise WQAuthError(f"认证失败: {response.text}")
-
-        logger.info("认证成功")
+    def _ensure_valid_session(self) -> None:
+        """确保 session 有效，如果过期则重新认证"""
+        self.session = self._session_manager.get_session()
 
     # ==================== Alpha 操作 ====================
 
