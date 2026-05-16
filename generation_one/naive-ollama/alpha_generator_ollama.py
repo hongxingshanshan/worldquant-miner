@@ -1174,8 +1174,12 @@ Strategy Suggestions (pick one or combine):
                     sim_resp.status_code == 400 and
                     "authentication credentials" in sim_resp.text.lower()
                 ):
-                    logger.warning("Authentication expired, refreshing session...")
-                    self.setup_auth(self.credentials_path)  # Refresh authentication
+                    logger.warning("Authentication expired, refreshing session via unified manager...")
+                    # 使用统一 Session 管理器刷新 session
+                    self.sess = self._session_manager.get_session()
+                    if self.sess is None:
+                        logger.error("Session refresh failed")
+                        return {"status": "error", "message": "Session refresh failed"}
                     sim_resp = submit_simulation()  # Retry with new auth
 
                 if sim_resp.status_code != 201:

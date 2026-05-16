@@ -258,7 +258,11 @@ class WorldQuantBrainAPIClient:
         offset: int = 0,
         order: str = '-dateCreated',
         status: str = None,
-        hidden: bool = False
+        hidden: bool = False,
+        date_created_gte: str = None,
+        date_created_lt: str = None,
+        date_submitted_gte: str = None,
+        date_submitted_lt: str = None
     ) -> List[Dict]:
         """
         获取用户 Alpha 列表
@@ -269,10 +273,20 @@ class WorldQuantBrainAPIClient:
             order: 排序方式
             status: 状态过滤
             hidden: 是否包含隐藏的
+            date_created_gte: 创建时间大于等于 (dateCreated>=)
+            date_created_lt: 创建时间小于 (dateCreated<)
+            date_submitted_gte: 提交时间大于等于 (dateSubmitted>=)
+            date_submitted_lt: 提交时间小于 (dateSubmitted<)
 
         Returns:
             Alpha 列表
+
+        Note:
+            时间参数必须使用 ISO 8601 格式（如 2026-05-17T00:00:00-04:00）
+            由于 requests 会自动编码 URL 参数中的特殊字符（如 : 变成 %3A），
+            导致 WorldQuant Brain API 无法识别时间格式，因此时间参数需要手动构造 URL。
         """
+        # 基础参数（可以安全使用 params 自动编码）
         params = {
             'limit': limit,
             'offset': offset,
@@ -283,11 +297,47 @@ class WorldQuantBrainAPIClient:
         if status:
             params['status'] = status
 
-        response = self.session.get(
-            f'{self.base_url}/users/self/alphas',
-            params=params,
-            timeout=self.timeout
-        )
+        # 检查是否有时间过滤参数
+        has_time_filter = any([date_created_gte, date_created_lt, date_submitted_gte, date_submitted_lt])
+
+        if has_time_filter:
+            # 手动构造 URL，避免时间格式中的冒号被编码
+            # WorldQuant Brain API 要求时间格式为 ISO 8601（如 2026-05-17T00:00:00-04:00）
+            # 不能编码时间中的冒号
+            from urllib.parse import urlencode
+
+            # 构造基础 URL 和参数
+            base_url = f'{self.base_url}/users/self/alphas'
+            query_parts = []
+
+            # 添加基础参数
+            for key, value in params.items():
+                query_parts.append(f'{key}={value}')
+
+            # 添加时间过滤参数（不编码时间值）
+            if date_created_gte:
+                query_parts.append(f'dateCreated>={date_created_gte}')
+            if date_created_lt:
+                query_parts.append(f'dateCreated<{date_created_lt}')
+            if date_submitted_gte:
+                query_parts.append(f'dateSubmitted>={date_submitted_gte}')
+            if date_submitted_lt:
+                query_parts.append(f'dateSubmitted<{date_submitted_lt}')
+
+            # 构造完整 URL
+            full_url = f'{base_url}?{"&".join(query_parts)}'
+
+            response = self.session.get(
+                full_url,
+                timeout=self.timeout
+            )
+        else:
+            # 无时间参数，使用正常的 params 方式
+            response = self.session.get(
+                f'{self.base_url}/users/self/alphas',
+                params=params,
+                timeout=self.timeout
+            )
 
         if response.status_code == 401:
             raise WQAuthError("会话过期")

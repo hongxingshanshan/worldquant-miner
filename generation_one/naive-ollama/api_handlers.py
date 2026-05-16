@@ -113,6 +113,18 @@ def register_api_routes(app, dashboard):
         """API endpoint to submit alpha to WorldQuant Brain."""
         return jsonify(dashboard.submit_alpha_by_id(alpha_id))
 
+    @app.route('/api/submit-batch', methods=['POST'])
+    def api_submit_batch():
+        """API endpoint to batch submit submittable alphas."""
+        limit = request.args.get('limit', 10, type=int)
+        dry_run = request.args.get('dry_run', 'false').lower() == 'true'
+        return jsonify(dashboard.submit_batch_alphas(limit=limit, dry_run=dry_run))
+
+    @app.route('/api/submittable-count')
+    def api_submittable_count():
+        """API endpoint to get count of submittable alphas."""
+        return jsonify(dashboard.get_submittable_count())
+
     @app.route('/api/failed-alphas')
     def api_failed_alphas():
         """API endpoint to get failed alphas list (从 API 获取)."""

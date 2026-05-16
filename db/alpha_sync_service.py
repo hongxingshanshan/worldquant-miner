@@ -140,60 +140,88 @@ class AlphaSyncService:
         logger.info(f"同步完成: {self.stats}")
         return self.stats
 
-    def sync_incremental(self, since: datetime = None, batch_size: int = 50) -> Dict:
+    def sync_incremental(self, batch_size: int = 50) -> Dict:
         """
-        增量同步（按创建时间）
+        增量同步（按创建时间范围）
 
-        获取数据库中最新的 date_created，同步该时间之后创建的 Alpha
+        时间范围计算：
+        - 开始时间：数据库最大创建时间 - 30分钟（北京时间）→ 转换为美国 EST 时间
+        - 结束时间：当前时间 + 30分钟（北京时间）→ 转换为美国 EST 时间
 
         Args:
-            since: 上次同步时间（可选，默认使用数据库中最新的 date_created）
             batch_size: 每批次获取数量
 
         Returns:
             同步统计信息
         """
+        from datetime import timedelta
+        import pytz
+
         logger.info("开始增量同步")
         start_time = datetime.now()
         self.stats = {'total': 0, 'new': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
 
-        # 获取数据库中最新的 date_created
-        if since is None:
-            result = self.db.query_one("SELECT MAX(date_created) as max_date FROM alpha")
-            if result and result.get('max_date'):
-                since = result['max_date']
-                # 确保是 naive datetime（去掉时区信息）
-                if hasattr(since, 'tzinfo') and since.tzinfo is not None:
-                    since = since.replace(tzinfo=None)
-                logger.info(f"从数据库获取最新创建时间: {since}")
+        # 时区定义
+        cn_tz = pytz.timezone('Asia/Shanghai')      # 北京时间 UTC+8
+        est_tz = pytz.timezone('America/New_York')  # 美国东部时间 EST/EDT
 
+        # 1. 计算开始时间：数据库最大创建时间 - 30分钟
+        result = self.db.query_one("SELECT MAX(date_created) as max_date FROM alpha")
+        max_date_cn = result.get('max_date') if result else None
+
+        if max_date_cn:
+            # 数据库存储的是北京时间（naive datetime），需要添加时区信息
+            if hasattr(max_date_cn, 'tzinfo') and max_date_cn.tzinfo is not None:
+                max_date_cn = max_date_cn.replace(tzinfo=None)
+            max_date_cn = cn_tz.localize(max_date_cn)
+            # 减去 30 分钟
+            start_time_cn = max_date_cn - timedelta(minutes=30)
+            logger.info(f"数据库最大创建时间（北京时间）: {max_date_cn}, 开始同步时间: {start_time_cn}")
+        else:
+            # 数据库为空，从 7 天前开始
+            start_time_cn = datetime.now(cn_tz) - timedelta(days=7)
+            logger.info(f"数据库为空，从 7 天前开始同步: {start_time_cn}")
+
+        # 2. 计算结束时间：当前时间 + 30分钟（北京时间）
+        end_time_cn = datetime.now(cn_tz) + timedelta(minutes=30)
+
+        # 3. 转换为美国 EST 时间
+        start_time_est = start_time_cn.astimezone(est_tz)
+        end_time_est = end_time_cn.astimezone(est_tz)
+
+        # 4. 格式化为 API 需要的格式（ISO 8601 带时区偏移）
+        # 使用 isoformat() 自动生成正确格式（如 2026-05-17T00:00:00-04:00）
+        date_from = start_time_est.isoformat()
+        date_to = end_time_est.isoformat()
+
+        logger.info(f"增量同步时间范围（EST）: {date_from} ~ {date_to}")
+
+        # 5. 分批获取 Alpha
         offset = 0
         while True:
             try:
-                alphas = self._fetch_alphas(limit=batch_size, offset=offset, order='-dateCreated')
+                alphas = self._fetch_alphas(
+                    limit=batch_size,
+                    offset=offset,
+                    order='-dateCreated',
+                    date_from=date_from,
+                    date_to=date_to
+                )
+
                 if not alphas:
                     break
 
                 for alpha in alphas:
                     alpha_id = alpha.get('id')
-                    alpha_date_created = self._parse_datetime(alpha.get('dateCreated'))
-
-                    # 如果指定了 since，且 Alpha 创建时间早于 since，跳过
-                    if since and alpha_date_created:
-                        # 统一为 naive datetime 比较
-                        if hasattr(alpha_date_created, 'tzinfo') and alpha_date_created.tzinfo is not None:
-                            alpha_date_created = alpha_date_created.replace(tzinfo=None)
 
                     # 检查是否已存在
                     existing = self.db.query_one(
                         "SELECT id FROM alpha WHERE id = %s", (alpha_id,)
                     )
                     if existing:
-                        # 已存在，更新数据
                         self._save_alpha(alpha)
                         self.stats['updated'] += 1
                     else:
-                        # 新数据
                         self._save_alpha(alpha)
                         self.stats['new'] += 1
 
@@ -209,14 +237,28 @@ class AlphaSyncService:
         logger.info(f"增量同步完成: {self.stats}")
         return self.stats
 
-    def _fetch_alphas(self, limit: int = 100, offset: int = 0, order: str = '-dateCreated') -> List[Dict]:
-        """从 API 获取 Alpha 列表"""
+    def _fetch_alphas(self, limit: int = 100, offset: int = 0, order: str = '-dateCreated',
+                      date_from: str = None, date_to: str = None) -> List[Dict]:
+        """从 API 获取 Alpha 列表
+
+        Args:
+            limit: 返回数量
+            offset: 偏移量
+            order: 排序方式
+            date_from: 创建时间大于等于 (dateCreated>=)
+            date_to: 创建时间小于 (dateCreated<)
+
+        Returns:
+            Alpha 列表
+        """
         try:
             return self.api_client.get_user_alphas(
                 limit=limit,
                 offset=offset,
                 order=order,
-                hidden=False
+                hidden=False,
+                date_created_gte=date_from,
+                date_created_lt=date_to
             )
         except WQAPIError as e:
             logger.error(f"API 错误: {e}")

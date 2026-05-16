@@ -562,11 +562,18 @@
 
         <!-- 同步区域 -->
         <div class="sync-section">
+            <button id="syncIncrementalBtn" class="btn btn-primary" onclick="syncIncremental()">
+                增量同步
+            </button>
             <button id="syncFullBtn" class="btn btn-secondary" onclick="syncFull()">
-                同步
+                全量同步
+            </button>
+            <button id="batchSubmitBtn" class="btn btn-success" onclick="batchSubmit()">
+                批量提交
             </button>
             <div class="sync-info">
                 <span>📦 总数: <strong id="alphaCount">-</strong></span>
+                <span>✅ 可提交: <strong id="submittableCount">-</strong></span>
                 <span>⏰ 最后同步: <strong id="lastSyncTime">-</strong></span>
                 <span>🆕 最新创建: <strong id="lastCreatedTime">-</strong></span>
             </div>
@@ -703,6 +710,7 @@
         // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', function() {
             updateSyncStatus();
+            updateSubmittableCount();
             refreshAlphaList();
         });
 
@@ -717,6 +725,23 @@
                 document.getElementById('lastCreatedTime').textContent = formatDateTime(data.last_created_time);
             } catch (error) {
                 console.error('获取同步状态失败:', error);
+            }
+        }
+
+        // 更新可提交数量
+        async function updateSubmittableCount() {
+            try {
+                const response = await fetch('/api/submittable-count');
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('submittableCount').textContent = data.count || 0;
+                } else {
+                    document.getElementById('submittableCount').textContent = '-';
+                }
+            } catch (error) {
+                console.error('获取可提交数量失败:', error);
+                document.getElementById('submittableCount').textContent = '-';
             }
         }
 
@@ -1112,6 +1137,7 @@
                                <p>更新: <b>${result.stats.updated}</b></p>`
                     });
                     updateSyncStatus();
+                    updateSubmittableCount();
                     refreshAlphaList();
                 } else {
                     Swal.fire({
@@ -1129,6 +1155,46 @@
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '全量同步';
+            }
+        }
+
+        // 增量同步
+        async function syncIncremental() {
+            const btn = document.getElementById('syncIncrementalBtn');
+            btn.disabled = true;
+            btn.innerHTML = '同步中...';
+
+            try {
+                const response = await fetch('/api/sync', { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: '增量同步完成',
+                        html: `<p>新增: <b>${result.stats.new}</b></p>
+                               <p>更新: <b>${result.stats.updated}</b></p>
+                               <p>跳过: <b>${result.stats.skipped}</b></p>`
+                    });
+                    updateSyncStatus();
+                    updateSubmittableCount();
+                    refreshAlphaList();
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '同步失败',
+                        text: result.error
+                    });
+                }
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '同步失败',
+                    text: error
+                });
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '增量同步';
             }
         }
 
@@ -1217,6 +1283,7 @@
                         text: result.message || `Alpha ${alphaId} 已提交`
                     });
                     refreshAlphaList();
+                    updateSubmittableCount();
                 } else {
                     Swal.fire({
                         icon: 'error',
@@ -1228,6 +1295,122 @@
                 Swal.fire({
                     icon: 'error',
                     title: '提交失败',
+                    text: error
+                });
+            }
+        }
+
+        // 批量提交 Alpha
+        async function batchSubmit() {
+            // 先获取可提交数量
+            const countResponse = await fetch('/api/submittable-count');
+            const countData = await countResponse.json();
+            const submittableCount = countData.count || 0;
+
+            if (submittableCount === 0) {
+                Swal.fire({
+                    icon: 'info',
+                    title: '没有可提交的 Alpha',
+                    text: '当前没有通过 IS 检查且未提交的 Alpha'
+                });
+                return;
+            }
+
+            // 询问提交数量
+            const inputResult = await Swal.fire({
+                icon: 'question',
+                title: '批量提交 Alpha',
+                html: `
+                    <p>当前可提交: <b>${submittableCount}</b> 个</p>
+                    <p style="margin-top: 10px;">请输入要提交的数量:</p>
+                    <input type="number" id="batchLimit" class="swal2-input"
+                           value="${Math.min(submittableCount, 10)}"
+                           min="1" max="${submittableCount}" style="width: 100px;">
+                `,
+                showCancelButton: true,
+                confirmButtonText: '开始提交',
+                cancelButtonText: '取消',
+                preConfirm: () => {
+                    const limit = document.getElementById('batchLimit').value;
+                    if (limit < 1 || limit > submittableCount) {
+                        Swal.showValidationMessage(`数量必须在 1-${submittableCount} 之间`);
+                        return false;
+                    }
+                    return parseInt(limit);
+                }
+            });
+
+            if (!inputResult.isConfirmed) {
+                return;
+            }
+
+            const limit = inputResult.value;
+
+            // 确认提交
+            const confirmResult = await Swal.fire({
+                icon: 'warning',
+                title: `确认批量提交 ${limit} 个 Alpha?`,
+                text: '提交后将无法撤销，请确认',
+                showCancelButton: true,
+                confirmButtonText: '确认提交',
+                cancelButtonText: '取消',
+                confirmButtonColor: '#3085d6'
+            });
+
+            if (!confirmResult.isConfirmed) {
+                return;
+            }
+
+            // 显示进度
+            Swal.fire({
+                title: '批量提交中...',
+                html: `<p>正在提交 ${limit} 个 Alpha</p><p style="margin-top:10px;">请稍候，可能需要几分钟</p>`,
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
+            try {
+                const response = await fetch(`/api/submit-batch?limit=${limit}`, { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    const submittedCount = result.total || 0;
+                    const failedCount = result.failed?.length || 0;
+
+                    let html = `
+                        <p>✅ 成功提交: <b>${submittedCount}</b> 个</p>
+                        <p>❌ 提交失败: <b>${failedCount}</b> 个</p>
+                    `;
+
+                    if (result.failed && result.failed.length > 0) {
+                        html += '<hr><p style="color:#f44336;">失败详情:</p><ul style="font-size:12px;">';
+                        result.failed.forEach(f => {
+                            html += `<li>${f.id}: ${f.error}</li>`;
+                        });
+                        html += '</ul>';
+                    }
+
+                    Swal.fire({
+                        icon: submittedCount > 0 ? 'success' : 'warning',
+                        title: '批量提交完成',
+                        html: html
+                    });
+
+                    refreshAlphaList();
+                    updateSubmittableCount();
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: '批量提交失败',
+                        text: result.error || '未知错误'
+                    });
+                }
+            } catch (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: '批量提交失败',
                     text: error
                 });
             }

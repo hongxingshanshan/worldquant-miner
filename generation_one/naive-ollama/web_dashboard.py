@@ -813,6 +813,142 @@ class AlphaDashboard:
 
         return result
 
+    def submit_batch_alphas(self, limit: int = 10, dry_run: bool = False) -> Dict:
+        """
+        批量提交可提交的 Alpha
+
+        Args:
+            limit: 最大提交数量
+            dry_run: 预检查模式，只返回可提交数量不实际提交
+
+        Returns:
+            提交结果
+        """
+        result = {
+            "success": False,
+            "submitted": [],
+            "failed": [],
+            "skipped": [],
+            "total": 0,
+            "submittable_count": 0,
+            "error": None
+        }
+
+        try:
+            # 1. 查询可提交的 Alpha
+            submittable_alphas = self._get_submittable_alphas(limit * 2)  # 多查一些备用
+            result["submittable_count"] = len(submittable_alphas)
+
+            if dry_run:
+                result["success"] = True
+                result["message"] = f"预检查完成，共有 {len(submittable_alphas)} 个可提交的 Alpha"
+                return result
+
+            if not submittable_alphas:
+                result["success"] = True
+                result["message"] = "没有可提交的 Alpha"
+                return result
+
+            # 2. 逐个提交（限制数量）
+            to_submit = submittable_alphas[:limit]
+
+            for alpha in to_submit:
+                alpha_id = alpha['id']
+                submit_result = self.submit_alpha_by_id(alpha_id)
+
+                if submit_result.get('success'):
+                    result["submitted"].append({
+                        "id": alpha_id,
+                        "status": submit_result.get('status'),
+                        "message": submit_result.get('message')
+                    })
+                else:
+                    result["failed"].append({
+                        "id": alpha_id,
+                        "error": submit_result.get('error', '未知错误')
+                    })
+
+                # 添加短暂延迟，避免请求过快
+                time.sleep(1)
+
+            result["total"] = len(result["submitted"])
+            result["success"] = len(result["submitted"]) > 0
+
+        except Exception as e:
+            logger.error(f"批量提交 Alpha 失败: {e}")
+            result["error"] = str(e)
+
+        return result
+
+    def _get_submittable_alphas(self, limit: int = 50) -> List[Dict]:
+        """
+        获取可提交的 Alpha 列表
+
+        Args:
+            limit: 最大返回数量
+
+        Returns:
+            可提交的 Alpha 列表
+        """
+        if not self.query_service:
+            return []
+
+        try:
+            sql = """
+                SELECT a.id, a.expression, a.status, a.grade,
+                       a.date_created, ap_is.sharpe as is_sharpe
+                FROM alpha a
+                LEFT JOIN alpha_performance ap_is ON a.id = ap_is.alpha_id AND ap_is.stage = 'IS'
+                LEFT JOIN (
+                    SELECT alpha_id,
+                           SUM(CASE WHEN result = 'FAIL' THEN 1 ELSE 0 END) as is_checks_fail
+                    FROM alpha_checks WHERE stage = 'IS'
+                    GROUP BY alpha_id
+                ) is_checks ON a.id = is_checks.alpha_id
+                WHERE a.status = 'UNSUBMITTED'
+                  AND (is_checks.is_checks_fail = 0 OR is_checks.is_checks_fail IS NULL)
+                ORDER BY a.date_created DESC
+                LIMIT %s
+            """
+            alphas = self.query_service.db.query_all(sql, (limit,))
+            return alphas if alphas else []
+        except Exception as e:
+            logger.error(f"获取可提交 Alpha 列表失败: {e}")
+            return []
+
+    def get_submittable_count(self) -> Dict:
+        """获取可提交 Alpha 数量"""
+        result = {
+            "success": False,
+            "count": 0,
+            "error": None
+        }
+
+        if not self.query_service:
+            result["error"] = "数据库服务不可用"
+            return result
+
+        try:
+            sql = """
+                SELECT COUNT(*) as count
+                FROM alpha a
+                LEFT JOIN (
+                    SELECT alpha_id,
+                           SUM(CASE WHEN result = 'FAIL' THEN 1 ELSE 0 END) as is_checks_fail
+                    FROM alpha_checks WHERE stage = 'IS'
+                    GROUP BY alpha_id
+                ) is_checks ON a.id = is_checks.alpha_id
+                WHERE a.status = 'UNSUBMITTED'
+                  AND (is_checks.is_checks_fail = 0 OR is_checks.is_checks_fail IS NULL)
+            """
+            count_result = self.query_service.db.query_one(sql)
+            result["count"] = count_result['count'] if count_result else 0
+            result["success"] = True
+        except Exception as e:
+            result["error"] = str(e)
+
+        return result
+
     def _monitor_submission(self, alpha_id: str, sess, max_timeout_minutes: int = 10) -> Dict:
         """
         轮询监控提交状态

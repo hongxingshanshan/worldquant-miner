@@ -215,15 +215,27 @@ class AlphaConsumer(Thread):
                 sleep(5)
 
         # 将未提交的 Alpha 放回队列头部（优先处理）
-        # 先过滤掉重复的和已模拟的
+        # 先过滤掉重复的、已模拟的、已成功提交的
         valid_items = []
         skipped_duplicates = 0
         skipped_simulated = 0
+        skipped_already_submitted = 0
 
         for item in unsubmitted_items:
             alpha = item["expression"]
 
-            # 1. 检查是否已在队列中（避免重复）
+            # 1. 检查是否已在 pending_results 中（表示已成功提交到 API）
+            # 这是防止重复提交的关键检查
+            is_already_submitted = any(
+                pending["alpha"] == alpha
+                for pending in self.generator.pending_results.values()
+            )
+            if is_already_submitted:
+                skipped_already_submitted += 1
+                logger.debug(f"跳过已提交: {alpha[:50]}... (已在 pending_results 中)")
+                continue
+
+            # 2. 检查是否已在队列中（避免重复放回）
             if self.generator.alpha_queue:
                 is_duplicate = any(
                     existing["expression"] == alpha
@@ -234,7 +246,7 @@ class AlphaConsumer(Thread):
                     logger.debug(f"跳过重复: {alpha[:50]}...")
                     continue
 
-            # 2. 检查是否已经模拟过
+            # 3. 检查是否已经模拟过
             if self.generator._is_already_simulated(alpha):
                 skipped_simulated += 1
                 logger.debug(f"跳过已模拟: {alpha[:50]}...")
@@ -248,8 +260,8 @@ class AlphaConsumer(Thread):
                 self.generator.alpha_queue.queue.appendleft(item)
             logger.info(f"🔄 已将 {len(valid_items)} 个 Alpha 放回队列头部")
 
-        if skipped_duplicates > 0 or skipped_simulated > 0:
-            logger.info(f"📋 放回时过滤: {skipped_duplicates} 个重复, {skipped_simulated} 个已模拟")
+        if skipped_duplicates > 0 or skipped_simulated > 0 or skipped_already_submitted > 0:
+            logger.info(f"📋 放回时过滤: {skipped_duplicates} 个重复, {skipped_simulated} 个已模拟, {skipped_already_submitted} 个已提交")
 
         logger.info(f"📊 批次提交完成: {submitted}/{len(batch)} 成功, {len(valid_items)} 放回队列")
 
