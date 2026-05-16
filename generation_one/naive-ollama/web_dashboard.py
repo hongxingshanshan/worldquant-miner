@@ -836,7 +836,7 @@ class AlphaDashboard:
 
         try:
             # 1. 查询可提交的 Alpha
-            submittable_alphas = self._get_submittable_alphas(limit * 2)  # 多查一些备用
+            submittable_alphas = self._get_submittable_alphas(limit)  # 多查一些备用
             result["submittable_count"] = len(submittable_alphas)
 
             if dry_run:
@@ -873,6 +873,13 @@ class AlphaDashboard:
 
             result["total"] = len(result["submitted"])
             result["success"] = len(result["submitted"]) > 0
+
+            # 如果全部失败，设置汇总错误信息
+            if not result["success"] and result["failed"]:
+                failed_errors = [f"{f['id']}: {f['error']}" for f in result["failed"][:3]]
+                result["error"] = f"所有 Alpha 提交失败: {', '.join(failed_errors)}"
+                if len(result["failed"]) > 3:
+                    result["error"] += f" 等 {len(result['failed'])} 个"
 
         except Exception as e:
             logger.error(f"批量提交 Alpha 失败: {e}")
