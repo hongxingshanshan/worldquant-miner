@@ -35,7 +35,8 @@ class KnowledgeRetriever:
         query: str,
         top_k: int = None,
         layer_filter: Optional[List[str]] = None,
-        category_filter: Optional[str] = None
+        category_filter: Optional[str] = None,
+        collection: Optional[str] = None
     ) -> str:
         """
         检索相关知识
@@ -45,6 +46,7 @@ class KnowledgeRetriever:
             top_k: 返回结果数量
             layer_filter: 知识层级过滤
             category_filter: 分类过滤
+            collection: 指定集合名称（如 alpha_submitted, alpha_submittable, alpha_failure）
 
         Returns:
             组装好的知识上下文
@@ -61,7 +63,8 @@ class KnowledgeRetriever:
         results = self.store.search(
             query_embedding=query_embedding,
             n_results=top_k,
-            where=where_filter
+            where=where_filter,
+            collection_name=collection
         )
 
         # 组装上下文

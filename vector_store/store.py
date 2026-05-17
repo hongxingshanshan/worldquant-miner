@@ -66,7 +66,8 @@ class VectorStore:
         self,
         query_embedding: List[float],
         n_results: int = 5,
-        where: Optional[Dict] = None
+        where: Optional[Dict] = None,
+        collection_name: Optional[str] = None
     ) -> Dict:
         """
         语义搜索
@@ -75,11 +76,27 @@ class VectorStore:
             query_embedding: 查询向量
             n_results: 返回结果数量
             where: 元数据过滤条件
+            collection_name: 指定集合名称（如 alpha_submitted, alpha_submittable, alpha_failure）
 
         Returns:
             搜索结果
         """
-        return self.collection.query(
+        # 如果指定了集合名称，使用该集合
+        if collection_name:
+            try:
+                collection = self.client.get_collection(name=collection_name)
+            except Exception:
+                # 集合不存在，返回空结果
+                return {
+                    "documents": [[]],
+                    "metadatas": [[]],
+                    "distances": [[]],
+                    "ids": [[]]
+                }
+        else:
+            collection = self.collection
+
+        return collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
             where=where,

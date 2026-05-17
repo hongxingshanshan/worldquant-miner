@@ -190,18 +190,27 @@ def register_api_routes(app, dashboard):
 
     @app.route('/api/vector/stats')
     def api_vector_stats():
-        """向量数据库统计信息"""
+        """向量数据库统计信息（所有集合）"""
         if not VECTOR_DB_AVAILABLE:
             return jsonify({'error': f'向量数据库不可用: {VECTOR_DB_ERROR}'}), 500
 
         try:
             client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
-            collection = client.get_collection('knowledge_chunks')
+            collections = client.list_collections()
+
+            # 返回所有集合的统计信息
+            collection_stats = []
+            for col in collections:
+                collection_stats.append({
+                    'name': col.name,
+                    'count': col.count()
+                })
+
             return jsonify({
-                'collection': collection.name,
-                'count': collection.count(),
+                'collections': collection_stats,
                 'path': str(VECTOR_DB_PATH),
-                'model': 'paraphrase-multilingual-MiniLM-L12-v2'
+                'model': 'paraphrase-multilingual-MiniLM-L12-v2',
+                'total_count': sum(c['count'] for c in collection_stats)
             })
         except Exception as e:
             return jsonify({'error': str(e)}), 500
@@ -214,8 +223,10 @@ def register_api_routes(app, dashboard):
 
         try:
             limit = int(request.args.get('limit', 10))
+            collection_name = request.args.get('collection', 'knowledge_chunks')
+
             client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
-            collection = client.get_collection('knowledge_chunks')
+            collection = client.get_collection(collection_name)
 
             result = collection.get(limit=limit, include=['documents', 'metadatas'])
 
@@ -227,7 +238,7 @@ def register_api_routes(app, dashboard):
                     'metadata': result['metadatas'][i] if result['metadatas'] else {}
                 })
 
-            return jsonify({'count': len(results), 'results': results})
+            return jsonify({'count': len(results), 'results': results, 'collection': collection_name})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -239,17 +250,22 @@ def register_api_routes(app, dashboard):
 
         try:
             limit = int(request.args.get('limit', 10))
-            layer = request.args.get('layer', '')
-            category = request.args.get('category', '')
+            collection_name = request.args.get('collection', 'knowledge_chunks')
+            field = request.args.get('field', '')
+            value = request.args.get('value', '')
 
             client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
-            collection = client.get_collection('knowledge_chunks')
+            collection = client.get_collection(collection_name)
 
             where_filter = {}
-            if layer:
-                where_filter['layer'] = layer
-            if category:
-                where_filter['category'] = category
+            if field and value:
+                # 处理布尔值
+                if value.lower() == 'true':
+                    where_filter[field] = True
+                elif value.lower() == 'false':
+                    where_filter[field] = False
+                else:
+                    where_filter[field] = value
 
             result = collection.get(
                 where=where_filter if where_filter else None,
@@ -265,7 +281,7 @@ def register_api_routes(app, dashboard):
                     'metadata': result['metadatas'][i] if result['metadatas'] else {}
                 })
 
-            return jsonify({'count': len(results), 'results': results})
+            return jsonify({'count': len(results), 'results': results, 'collection': collection_name})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
@@ -279,12 +295,13 @@ def register_api_routes(app, dashboard):
             data = request.json
             query = data.get('query', '')
             limit = int(data.get('limit', 5))
+            collection_name = data.get('collection', 'knowledge_chunks')
 
             if not query:
                 return jsonify({'error': '查询内容不能为空'}), 400
 
             client = chromadb.PersistentClient(path=str(VECTOR_DB_PATH))
-            collection = client.get_collection('knowledge_chunks')
+            collection = client.get_collection(collection_name)
 
             # 生成查询向量
             emb = get_vector_embedder()
@@ -309,6 +326,6 @@ def register_api_routes(app, dashboard):
                         'similarity': similarity
                     })
 
-            return jsonify({'count': len(results), 'results': results})
+            return jsonify({'count': len(results), 'results': results, 'collection': collection_name})
         except Exception as e:
             return jsonify({'error': str(e)}), 500

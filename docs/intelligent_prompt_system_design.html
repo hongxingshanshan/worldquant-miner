@@ -1,0 +1,1932 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorldQuant Miner - 智能提示词系统实现方案</title>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #1e40af;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --error-color: #ef4444;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-color: #1e293b;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background: var(--bg-color);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 40px 20px;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .section {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .section h2 {
+            color: var(--primary-color);
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .section h3 {
+            color: var(--text-color);
+            font-size: 1.2rem;
+            margin: 20px 0 15px;
+        }
+
+        .section h4 {
+            color: var(--text-muted);
+            font-size: 1rem;
+            margin: 15px 0 10px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-card .number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-card .label {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .architecture-diagram {
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+
+        .flow-diagram {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 20px;
+        }
+
+        .flow-box {
+            background: white;
+            border: 2px solid var(--primary-color);
+            border-radius: 8px;
+            padding: 15px 20px;
+            text-align: center;
+            min-width: 150px;
+        }
+
+        .flow-box.highlight {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .flow-arrow {
+            font-size: 1.5rem;
+            color: var(--primary-color);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: #f1f5f9;
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background: #f8fafc;
+        }
+
+        code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+
+        pre {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        pre code {
+            background: transparent;
+            padding: 0;
+            color: inherit;
+        }
+
+        .highlight-box {
+            background: #fef3c7;
+            border-left: 4px solid var(--warning-color);
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .success-box {
+            background: #d1fae5;
+            border-left: 4px solid var(--success-color);
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .error-box {
+            background: #fee2e2;
+            border-left: 4px solid var(--error-color);
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        ul, ol {
+            margin: 15px 0;
+            padding-left: 25px;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .tag-blue { background: #dbeafe; color: #1e40af; }
+        .tag-green { background: #d1fae5; color: #065f46; }
+        .tag-yellow { background: #fef3c7; color: #92400e; }
+        .tag-red { background: #fee2e2; color: #991b1b; }
+        .tag-purple { background: #ede9fe; color: #5b21b6; }
+
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--border-color);
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-bottom: 20px;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -34px;
+            top: 5px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--primary-color);
+        }
+
+        .file-tree {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .file-tree .folder {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+
+        .file-tree .file {
+            color: var(--text-muted);
+            padding-left: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .flow-diagram {
+                flex-direction: column;
+            }
+
+            .flow-arrow {
+                transform: rotate(90deg);
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>WorldQuant Miner 智能提示词系统</h1>
+            <p>基于向量数据库的 Alpha 生成与优化提示词动态构建方案</p>
+            <p style="margin-top: 10px; padding: 8px 16px; background: rgba(16, 185, 129, 0.2); border-radius: 6px; display: inline-block;">
+                <strong>✅ 实现状态: 核心功能已完成</strong> |
+                已提交: 18 条 | 可提交: 68 条 | 失败: 6712 条 | 最后同步: 2026-05-18
+            </p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- 一、系统概述 -->
+        <section class="section">
+            <h2>一、系统概述</h2>
+
+            <h3>1.1 设计目标</h3>
+            <p>构建一个智能提示词系统，通过向量数据库动态检索相关知识，为 Alpha 生成和优化提供精准、上下文相关的提示词，从而提高 Alpha 质量和通过率。</p>
+
+            <h3>1.2 当前系统状态</h3>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="number">6,798</div>
+                    <div class="label">数据库 Alpha 总数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">18</div>
+                    <div class="label">已提交 Alpha (ACTIVE)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">68</div>
+                    <div class="label">可提交 Alpha</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">6,712</div>
+                    <div class="label">失败 Alpha</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">1,918</div>
+                    <div class="label">向量知识块</div>
+                </div>
+                <div class="stat-card">
+                    <div class="number">8,716</div>
+                    <div class="label">向量库总记录</div>
+                </div>
+            </div>
+
+            <h3>1.3 核心问题分析</h3>
+            <div class="error-box">
+                <strong>⚠️ 数据修正（基于实际数据库分析）</strong>
+                <p>方案初稿中的失败类型占比数据有误，已根据实际数据库查询结果修正。</p>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>问题类型</th>
+                        <th>实际占比</th>
+                        <th>根本原因</th>
+                        <th>解决方案</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="tag tag-red">LOW_FITNESS</span></td>
+                        <td>39.1%</td>
+                        <td>Sharpe 与 Turnover 不平衡</td>
+                        <td>检索成功案例的参数配置</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tag tag-red">LOW_SHARPE</span></td>
+                        <td>38.4%</td>
+                        <td>信号强度不足</td>
+                        <td>增强信号：scale(), normalize()</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tag tag-yellow">LOW_SUB_UNIVERSE_SHARPE</span></td>
+                        <td>12.1%</td>
+                        <td>行业中性化不足</td>
+                        <td>检索中性化最佳实践</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tag tag-purple">CONCENTRATED_WEIGHT</span></td>
+                        <td>7.1%</td>
+                        <td>缺少外层 rank() 操作符</td>
+                        <td>强制添加外层排名</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tag tag-blue">LOW_TURNOVER</span></td>
+                        <td>2.1%</td>
+                        <td>交易频率过低</td>
+                        <td>缩短时间窗口</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tag tag-blue">HIGH_TURNOVER</span></td>
+                        <td>1.1%</td>
+                        <td>交易频率过高</td>
+                        <td>时间平滑处理</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>1.4 失败 Alpha 表达式特征分析</h3>
+            <div class="highlight-box">
+                <strong>关键发现：100% 的失败 Alpha 缺少关键特征</strong>
+                <p>分析 LOW_FITNESS 失败的 Alpha 表达式，发现以下规律：</p>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>特征</th>
+                        <th>失败 Alpha</th>
+                        <th>成功 Alpha</th>
+                        <th>结论</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>外层排名 (rank/ts_rank/group_rank)</td>
+                        <td><span class="tag tag-red">0%</span></td>
+                        <td><span class="tag tag-green">90%</span></td>
+                        <td><strong>必须添加</strong></td>
+                    </tr>
+                    <tr>
+                        <td>市值标准化 (divide(field, cap))</td>
+                        <td><span class="tag tag-red">0%</span></td>
+                        <td><span class="tag tag-green">100%</span></td>
+                        <td><strong>必须添加</strong></td>
+                    </tr>
+                    <tr>
+                        <td>行业中性化 (group_neutralize)</td>
+                        <td><span class="tag tag-red">0%</span></td>
+                        <td><span class="tag tag-yellow">35%</span></td>
+                        <td>可选，提升 SUB_UNIVERSE_SHARPE</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>1.5 成功 Alpha 模式总结</h3>
+            <pre><code># 成功模式（基于 20 个成功 Alpha 分析）
+# 核心结构：rank(ts_xxx(divide(field, cap), window))
+
+rank(ts_zscore(divide(fnd6_xxx, cap), 60))           # 最常见模式
+rank(ts_rank(divide(anl4_xxx, cap), 60))             # 时间序列排名
+group_rank(ts_std_dev(divide(fnd6_xxx, cap), 60), industry)  # 行业内排名
+group_neutralize(ts_rank(divide(fnd6_xxx, cap), 60), industry)  # 行业中性化
+
+# 关键参数范围
+- 时间窗口: 40-120 天（常见: 60, 80）
+- Sharpe 范围: 1.27-1.92
+- Fitness 范围: 1.00-1.47
+- Turnover 范围: 0.02-0.38</code></pre>
+        </section>
+
+        <!-- 二、系统架构 -->
+        <section class="section">
+            <h2>二、系统架构</h2>
+
+            <h3>2.1 整体架构图</h3>
+            <div class="architecture-diagram">
+                <div class="flow-diagram">
+                    <div class="flow-box">
+                        <strong>MySQL 数据库</strong><br>
+                        <small>Alpha 数据存储</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box highlight">
+                        <strong>数据同步服务</strong><br>
+                        <small>定时向量化</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">
+                        <strong>ChromaDB</strong><br>
+                        <small>向量数据库</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box highlight">
+                        <strong>提示词构建器</strong><br>
+                        <small>动态检索</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">
+                        <strong>LLM</strong><br>
+                        <small>生成/优化 Alpha</small>
+                    </div>
+                </div>
+            </div>
+
+            <h3>2.2 数据流向</h3>
+            <div class="timeline">
+                <div class="timeline-item">
+                    <strong>Step 1: 数据采集</strong>
+                    <p>从 WorldQuant Brain API 同步 Alpha 数据到 MySQL（已实现：alpha_sync_service.py）</p>
+                </div>
+                <div class="timeline-item">
+                    <strong>Step 2: 向量化处理</strong>
+                    <p>将 MySQL 中的 Alpha 数据转换为向量存入 ChromaDB（待实现）</p>
+                </div>
+                <div class="timeline-item">
+                    <strong>Step 3: 语义检索</strong>
+                    <p>根据当前任务检索相关知识和成功案例（部分实现：retriever.py）</p>
+                </div>
+                <div class="timeline-item">
+                    <strong>Step 4: 提示词构建</strong>
+                    <p>动态组装提示词，注入检索到的上下文（待实现）</p>
+                </div>
+                <div class="timeline-item">
+                    <strong>Step 5: 反馈学习</strong>
+                    <p>将新生成的 Alpha 结果反馈到向量库（待实现）</p>
+                </div>
+            </div>
+
+            <h3>2.3 现有组件清单</h3>
+            <div class="file-tree">
+                <div class="folder">vector_store/</div>
+                <div class="file">├── config.py          # 配置管理（嵌入模型、分块、检索参数）</div>
+                <div class="file">├── embedding.py       # 向量嵌入模型（sentence-transformers）</div>
+                <div class="file">├── store.py           # ChromaDB 存储管理</div>
+                <div class="file">├── retriever.py       # 知识检索器</div>
+                <div class="file">├── ingestor.py        # 知识入库处理器</div>
+                <div class="file">├── chunker.py         # 文本分块器</div>
+                <div class="file">├── forum_fetcher.py   # 论坛帖子采集器</div>
+                <div class="file">└── chroma_db/         # 向量数据存储目录</div>
+                <br>
+                <div class="folder">db/</div>
+                <div class="file">├── alpha_sync_service.py   # Alpha 数据同步服务</div>
+                <div class="file">├── alpha_query_service.py  # Alpha 查询服务</div>
+                <div class="file">├── db_connector.py         # 数据库连接器</div>
+                <div class="file">└── migrations/             # 数据库迁移脚本</div>
+                <br>
+                <div class="folder">generation_one/naive-ollama/</div>
+                <div class="file">├── alpha_generator_ollama.py  # Alpha 生成器</div>
+                <div class="file">├── alpha_optimizer.py         # Alpha 优化器</div>
+                <div class="file">├── alpha_patterns.py          # 模式加载器</div>
+                <div class="file">└── llm_client.py              # LLM 客户端</div>
+            </div>
+        </section>
+
+        <!-- 三、向量数据库设计 -->
+        <section class="section">
+            <h2>三、向量数据库设计</h2>
+
+            <h3>3.1 集合结构设计</h3>
+            <div class="highlight-box">
+                <strong>当前状态：</strong>
+                <p>现有集合 <code>knowledge_chunks</code>（1,918 条记录）存储知识库文档块，需要新增 Alpha 专用集合。</p>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>集合名称</th>
+                        <th>用途</th>
+                        <th>数据来源</th>
+                        <th>更新频率</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>knowledge_chunks</code></td>
+                        <td>知识库文档块</td>
+                        <td>knowledge_base/*.md</td>
+                        <td>手动更新</td>
+                        <td><span class="tag tag-green">已存在 (1,918条)</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>alpha_submitted</code></td>
+                        <td>已提交 Alpha（status=ACTIVE）</td>
+                        <td>MySQL (status='ACTIVE')</td>
+                        <td>每小时</td>
+                        <td><span class="tag tag-green">已存在 (18条)</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>alpha_submittable</code></td>
+                        <td>可提交 Alpha（IS 检查 7 PASS, 0 FAIL）</td>
+                        <td>MySQL (status='UNSUBMITTED', 检查全通过)</td>
+                        <td>每小时</td>
+                        <td><span class="tag tag-green">已存在 (68条)</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>alpha_failure</code></td>
+                        <td>失败 Alpha（IS 检查有 FAIL）</td>
+                        <td>MySQL (检查有失败)</td>
+                        <td>每小时</td>
+                        <td><span class="tag tag-green">已存在 (6,712条)</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>alpha_optimization_cases</code></td>
+                        <td>优化成功案例</td>
+                        <td>优化历史记录表</td>
+                        <td>实时</td>
+                        <td><span class="tag tag-yellow">待数据</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>field_combinations</code></td>
+                        <td>字段组合模式</td>
+                        <td>分析成功 Alpha 的字段使用</td>
+                        <td>每天</td>
+                        <td><span class="tag tag-red">待创建</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>3.2 数据库表结构补充</h3>
+            <div class="error-box">
+                <strong>⚠️ 注意：需要新建优化历史表</strong>
+                <p>当前数据库缺少 Alpha 优化历史记录表，需要新建以支持优化案例的向量化。</p>
+            </div>
+
+            <pre><code>-- 新增：Alpha 优化历史表
+CREATE TABLE IF NOT EXISTS alpha_optimization_history (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    alpha_id VARCHAR(8) NOT NULL COMMENT 'Alpha ID',
+    original_expression TEXT COMMENT '原始表达式',
+    optimized_expression TEXT COMMENT '优化后表达式',
+    original_sharpe DECIMAL(10,6) COMMENT '原始 Sharpe',
+    original_fitness DECIMAL(10,6) COMMENT '原始 Fitness',
+    optimized_sharpe DECIMAL(10,6) COMMENT '优化后 Sharpe',
+    optimized_fitness DECIMAL(10,6) COMMENT '优化后 Fitness',
+    fail_type VARCHAR(50) COMMENT '失败类型',
+    optimization_method VARCHAR(100) COMMENT '优化方法',
+    success BOOLEAN DEFAULT FALSE COMMENT '是否成功',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX idx_alpha (alpha_id),
+    INDEX idx_success (success),
+    FOREIGN KEY (alpha_id) REFERENCES alpha(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Alpha 优化历史表';</code></pre>
+
+            <h3>3.3 Alpha 向量化 Schema</h3>
+            <div class="highlight-box">
+                <strong>设计原则：</strong>
+                <p>基于数据库实际表结构设计 metadata 字段，确保同步服务可直接映射。</p>
+            </div>
+
+            <pre><code>{
+    "id": "alpha_{alpha_id}",
+    "document": "表达式文本 + 关键特征描述",
+    "embedding": [768维向量],
+    "metadata": {
+        // === 主表字段 (alpha) ===
+        "alpha_id": "原始 Alpha ID",
+        "expression": "完整表达式",
+        "grade": "AVERAGE",
+        "status": "UNSUBMITTED",
+        "stage": "IS",
+        "operator_count": 4,
+        "date_created": "2026-05-17T10:00:00Z",
+
+        // === 性能指标 (alpha_performance, stage='IS') ===
+        "sharpe": 1.85,
+        "fitness": 1.20,
+        "turnover": 0.25,
+        "returns": 0.15,
+        "drawdown": -0.05,
+
+        // === 检查结果统计 ===
+        "checks_pass": 7,
+        "checks_fail": 0,
+
+        // === 表达式特征（特征提取器计算）===
+        "has_rank": true,              // 是否包含 rank()
+        "has_ts_rank": false,          // 是否包含 ts_rank()
+        "has_group_rank": true,        // 是否包含 group_rank()
+        "has_divide_cap": true,        // 是否包含 divide(..., cap)
+        "has_group_neutralize": false, // 是否包含 group_neutralize()
+        "time_window": 60,             // 提取的时间窗口参数
+        "outer_operator": "rank",      // 最外层操作符类型
+
+        // === 数据字段（特征提取器提取）===
+        "data_fields": ["fnd6_mfma2_oancf", "cap"],
+        "data_datasets": ["fundamental6"],
+
+        // === 失败信息（仅失败 Alpha）===
+        "fail_type": "LOW_FITNESS",    // 主要失败类型
+        "fail_check_name": "LOW_FITNESS",
+        "fail_limit_value": 1.0,
+        "fail_actual_value": 0.8,
+
+        // === 优化信息（仅优化案例）===
+        "original_expression": "优化前表达式",
+        "optimization_success": true,
+
+        // === 时间戳 ===
+        "synced_at": "2026-05-17T11:00:00Z"
+    }
+}</code></pre>
+
+            <h3>3.4 文本向量化策略</h3>
+            <p>Alpha 表达式的向量化需要包含语义信息，建议组合以下内容：</p>
+
+            <pre><code>def build_alpha_document(alpha_data: dict) -> str:
+    """构建 Alpha 文档用于向量化"""
+    parts = []
+
+    # 1. 表达式本身
+    parts.append(f"表达式: {alpha_data['expression']}")
+
+    # 2. 结构特征描述（基于实际分析的成功模式）
+    features = []
+
+    # 外层操作符类型（关键特征）
+    outer_op = alpha_data.get('outer_operator', 'none')
+    if outer_op != 'none':
+        features.append(f"外层使用 {outer_op}() 进行权重分布")
+    else:
+        features.append("缺少外层排名操作符")
+
+    # 市值标准化（100% 成功 Alpha 都有）
+    if alpha_data.get('has_divide_cap'):
+        features.append("使用市值标准化 divide(field, cap)")
+
+    # 行业中性化（35% 成功 Alpha 有）
+    if alpha_data.get('has_group_neutralize'):
+        features.append("使用行业中性化")
+
+    # 时间窗口
+    if alpha_data.get('time_window'):
+        features.append(f"时间窗口 {alpha_data['time_window']} 天")
+
+    parts.append("特征: " + ", ".join(features))
+
+    # 3. 性能指标描述
+    sharpe = alpha_data.get('sharpe', 0) or 0
+    fitness = alpha_data.get('fitness', 0) or 0
+    turnover = alpha_data.get('turnover', 0) or 0
+    parts.append(f"Sharpe: {sharpe:.2f}, Fitness: {fitness:.2f}, Turnover: {turnover:.2f}")
+
+    # 4. 数据字段描述
+    if alpha_data.get('data_fields'):
+        parts.append(f"数据字段: {', '.join(alpha_data['data_fields'][:5])}")
+
+    # 5. 失败原因（如果有）
+    if alpha_data.get('fail_type'):
+        parts.append(f"失败类型: {alpha_data['fail_type']}")
+        if alpha_data.get('fail_check_name'):
+            parts.append(f"失败检查: {alpha_data['fail_check_name']}")
+
+    return "\n".join(parts)
+
+
+def extract_outer_operator(expression: str) -> str:
+    """提取最外层操作符"""
+    expr = expression.strip()
+
+    # 检查最外层操作符
+    if expr.startswith('rank('):
+        return 'rank'
+    elif expr.startswith('ts_rank('):
+        return 'ts_rank'
+    elif expr.startswith('group_rank('):
+        return 'group_rank'
+    elif expr.startswith('group_neutralize('):
+        # group_neutralize 内部可能有 rank
+        return 'group_neutralize'
+    else:
+        return 'none'
+
+
+def extract_time_window(expression: str) -> Optional[int]:
+    """提取时间窗口参数"""
+    import re
+    # 匹配 ts_xxx(expr, N) 或 ts_xxx(expr, N, M) 中的 N
+    matches = re.findall(r'ts_\w+\([^,]+,\s*(\d+)', expression)
+    if matches:
+        return int(matches[0])
+    return None</code></pre>
+        </section>
+
+        <!-- 四、数据同步服务 -->
+        <section class="section">
+            <h2>四、数据同步服务</h2>
+
+            <h3>4.1 同步服务架构</h3>
+            <div class="architecture-diagram">
+                <div class="flow-diagram">
+                    <div class="flow-box">
+                        <strong>MySQL Alpha 表</strong><br>
+                        <small>6,798 条记录</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box highlight">
+                        <strong>AlphaVectorSync</strong><br>
+                        <small>增量同步</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">
+                        <strong>特征提取器</strong><br>
+                        <small>解析表达式</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">
+                        <strong>EmbeddingModel</strong><br>
+                        <small>生成向量</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">
+                        <strong>ChromaDB</strong><br>
+                        <small>多集合存储</small>
+                    </div>
+                </div>
+            </div>
+
+            <h3>4.2 核心代码结构</h3>
+            <pre><code># vector_store/alpha_vector_sync.py
+
+class AlphaVectorSync:
+    """Alpha 数据向量同步服务"""
+
+    def __init__(self, db_connector, persist_directory: str = None, embedding_model = None):
+        self.db = db_connector
+        # 使用 PersistentClient 确保数据持久化
+        self.client = chromadb.PersistentClient(path=persist_directory)
+        self.embedder = embedding_model or EmbeddingModel()
+        self.feature_extractor = AlphaFeatureExtractor()
+
+    def sync_submitted_alphas(self, limit: int = None) -> int:
+        """同步已提交 Alpha（status='ACTIVE'）到 alpha_submitted 集合"""
+        # 1. 从 MySQL 获取 status='ACTIVE' 的 Alpha（已通过 OS 阶段）
+        # 2. 提取表达式特征
+        # 3. 生成向量
+        # 4. 分批存入 ChromaDB（每批 5000 条）
+        pass
+
+    def sync_submittable_alphas(self, limit: int = None) -> int:
+        """同步可提交 Alpha（IS 检查 7 PASS, 0 FAIL）到 alpha_submittable 集合"""
+        # 1. 从 MySQL 获取 status='UNSUBMITTED' 且 IS 检查全通过的 Alpha
+        # 2. 提取表达式特征
+        # 3. 生成向量
+        # 4. 存入 ChromaDB
+        pass
+
+    def sync_failure_alphas(self, limit: int = None) -> int:
+        """同步失败 Alpha（IS 检查有 FAIL）到 alpha_failure 集合"""
+        # 1. 从 MySQL 获取 IS 检查有失败的 Alpha
+        # 2. 分析失败类型和详情
+        # 3. 生成向量（包含失败原因）
+        # 4. 支持全量同步（limit=None 时同步所有）
+        pass
+
+    def sync_optimization_cases(self, limit: int = 100) -> int:
+        """同步优化成功案例到 alpha_optimization_cases 集合"""
+        # 从优化历史记录中提取成功案例
+        pass
+
+    def full_sync(self) -> Dict:
+        """执行全量同步，返回同步统计信息"""
+        # 清空现有数据，依次同步三类 Alpha
+        pass
+
+    def _store_alphas(self, alphas: List[Dict], collection_key: str, category: str = None) -> int:
+        """存储 Alpha 到向量数据库（分批处理，每批 5000 条）"""
+        # ChromaDB 批量限制 5461，使用 5000 作为批次大小
+        pass
+
+    def extract_features(self, expression: str) -> dict:
+        """提取表达式特征"""
+        features = {
+            'has_rank': 'rank(' in expression.lower(),
+            'has_ts_rank': 'ts_rank(' in expression.lower(),
+            'has_group_rank': 'group_rank(' in expression.lower(),
+            'has_divide_cap': 'divide(' in expression.lower() and 'cap' in expression.lower(),
+            'has_group_neutralize': 'group_neutralize(' in expression.lower(),
+            'operator_count': self._count_operators(expression),
+            'time_window': self._extract_time_window(expression),
+            'data_fields': self._extract_fields(expression),
+        }
+        return features</code></pre>
+
+            <h3>4.3 同步策略</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>同步类型</th>
+                        <th>触发条件</th>
+                        <th>数据范围</th>
+                        <th>分类</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>已提交 Alpha 同步</td>
+                        <td>每小时定时</td>
+                        <td>status='ACTIVE' 的 Alpha（已通过 OS 阶段）</td>
+                        <td>已提交</td>
+                    </tr>
+                    <tr>
+                        <td>可提交 Alpha 同步</td>
+                        <td>每小时定时</td>
+                        <td>status='UNSUBMITTED' 且 IS 检查 7 PASS, 0 FAIL</td>
+                        <td>可提交</td>
+                    </tr>
+                    <tr>
+                        <td>失败 Alpha 同步</td>
+                        <td>每天凌晨</td>
+                        <td>IS 检查有 FAIL 的 Alpha（全量同步）</td>
+                        <td>失败</td>
+                    </tr>
+                    <tr>
+                        <td>优化案例同步</td>
+                        <td>优化成功后立即</td>
+                        <td>新优化案例</td>
+                        <td>优化案例</td>
+                    </tr>
+                    <tr>
+                        <td>字段组合分析</td>
+                        <td>每天凌晨</td>
+                        <td>已提交 Alpha</td>
+                        <td>分析</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 五、智能提示词构建 -->
+        <section class="section">
+            <h2>五、智能提示词构建</h2>
+
+            <h3>5.1 提示词构建器架构</h3>
+            <pre><code># generation_one/naive-ollama/prompt_builder.py
+
+class IntelligentPromptBuilder:
+    """智能提示词构建器"""
+
+    def __init__(self, retriever: KnowledgeRetriever):
+        self.retriever = retriever
+
+    def build_generation_prompt(
+        self,
+        data_fields: List[str],
+        operators: List[dict],
+        context: dict = None
+    ) -> str:
+        """构建 Alpha 生成提示词"""
+
+        # 1. 检索成功案例
+        success_cases = self.retriever.retrieve(
+            query="高 Sharpe 高 Fitness 的成功 Alpha 表达式模式",
+            collection="alpha_submitted",
+            top_k=5
+        )
+
+        # 2. 检索失败模式（用于避免）
+        failure_patterns = self.retriever.retrieve(
+            query="LOW_FITNESS 失败的 Alpha 特征",
+            collection="alpha_failure",
+            top_k=3
+        )
+
+        # 3. 检索字段组合建议
+        field_combos = self.retriever.retrieve(
+            query=f"数据字段 {' '.join(data_fields[:10])} 的成功组合",
+            collection="field_combinations",
+            top_k=3
+        )
+
+        # 4. 组装提示词
+        return self._assemble_prompt(
+            data_fields=data_fields,
+            operators=operators,
+            success_cases=success_cases,
+            failure_patterns=failure_patterns,
+            field_combos=field_combos,
+            context=context
+        )
+
+    def build_optimization_prompt(
+        self,
+        alpha_data: dict,
+        fail_type: str
+    ) -> str:
+        """构建 Alpha 优化提示词"""
+
+        # 1. 检索同类失败的成功优化案例
+        optimization_cases = self.retriever.retrieve(
+            query=f"{fail_type} 失败优化成功的案例",
+            collection="alpha_optimization_cases",
+            top_k=5
+        )
+
+        # 2. 检索相似表达式的成功版本
+        similar_success = self.retriever.retrieve(
+            query=alpha_data['expression'],
+            collection="alpha_submitted",
+            top_k=3
+        )
+
+        # 3. 检索针对性修复知识
+        fix_knowledge = self.retriever.retrieve(
+            query=f"如何修复 {fail_type} 检查失败",
+            collection="knowledge_chunks",
+            category_filter="technical_methods",
+            top_k=3
+        )
+
+        return self._assemble_optimization_prompt(
+            alpha_data=alpha_data,
+            fail_type=fail_type,
+            optimization_cases=optimization_cases,
+            similar_success=similar_success,
+            fix_knowledge=fix_knowledge
+        )</code></pre>
+
+            <h3>5.2 生成提示词模板</h3>
+            <pre><code>GENERATION_PROMPT_TEMPLATE = """
+# Alpha 表达式生成任务
+
+## 核心规则（必须遵守）
+1. **输出格式**：每行一个表达式，不要编号、注释或解释
+2. **外层操作符**：必须使用 rank() / ts_rank() / group_rank() 作为最外层
+3. **市值标准化**：财务数据必须使用 divide(field, cap)
+4. **时间窗口**：使用 20-120 天范围
+
+## 成功案例参考（检索自向量库）
+{success_cases}
+
+## 失败模式警示（避免以下特征）
+{failure_patterns}
+
+## 推荐字段组合
+{field_combos}
+
+## 可用数据字段
+{data_fields}
+
+## 可用操作符
+{operators}
+
+## 生成要求
+生成 {count} 个 Alpha 表达式，确保：
+- Sharpe 预期 > 1.5
+- Turnover 预期 0.15-0.35
+- 通过 CONCENTRATED_WEIGHT 检查
+"""</code></pre>
+
+            <h3>5.3 优化提示词模板</h3>
+            <pre><code>OPTIMIZATION_PROMPT_TEMPLATE = """
+# Alpha 表达式优化任务
+
+## 原始 Alpha
+- 表达式: {original_expression}
+- Sharpe: {sharpe:.2f}
+- Fitness: {fitness:.2f}
+- 失败检查: {fail_type}
+
+## 相似成功案例（检索自向量库）
+{similar_success}
+
+## 同类失败优化成功案例
+{optimization_cases}
+
+## 针对性修复知识
+{fix_knowledge}
+
+## 优化要求
+1. 保持核心逻辑，只做最小改动
+2. 针对失败类型 {fail_type} 进行修复
+3. 确保优化后表达式包含外层排名操作符
+
+## 输出格式
+直接输出优化后的表达式，不要包含解释。
+"""</code></pre>
+        </section>
+
+        <!-- 六、集成方案 -->
+        <section class="section">
+            <h2>六、集成方案</h2>
+
+            <h3>6.1 与现有系统集成</h3>
+            <div class="highlight-box">
+                <strong>关键集成点：</strong>
+                <ul>
+                    <li><code>alpha_generator_ollama.py</code> - 替换现有的静态提示词构建逻辑</li>
+                    <li><code>alpha_optimizer.py</code> - 增强优化提示词的针对性</li>
+                    <li><code>alpha_patterns.py</code> - 从向量库动态加载模式</li>
+                </ul>
+            </div>
+
+            <h3>6.2 修改 alpha_generator_ollama.py</h3>
+            <pre><code># 在 AlphaGenerator 类中添加
+
+def __init__(self, ...):
+    # ... 现有初始化代码 ...
+
+    # 初始化智能提示词构建器
+    from prompt_builder import IntelligentPromptBuilder
+    from vector_store.retriever import KnowledgeRetriever
+    self.retriever = KnowledgeRetriever()
+    self.prompt_builder = IntelligentPromptBuilder(self.retriever)
+
+def generate_alpha_ideas_with_ollama(self, data_fields, operators):
+    """使用智能提示词生成 Alpha"""
+
+    # 使用智能提示词构建器
+    prompt = self.prompt_builder.build_generation_prompt(
+        data_fields=[f['id'] for f in data_fields],
+        operators=operators,
+        context={
+            'recent_errors': self.get_simulation_errors()[-5:],
+            'generated_count': self.optimization_config.get('generate_per_cycle', 20)
+        }
+    )
+
+    # 调用 LLM
+    content = self.llm_client.generate(prompt, ...)
+
+    # ... 后续处理 ...</code></pre>
+
+            <h3>6.3 修改 alpha_optimizer.py</h3>
+            <pre><code># 在 AlphaOptimizer 类中添加
+
+def __init__(self, llm_client, wq_client=None, query_service=None):
+    # ... 现有初始化代码 ...
+
+    # 初始化智能提示词构建器
+    from prompt_builder import IntelligentPromptBuilder
+    from vector_store.retriever import KnowledgeRetriever
+    self.retriever = KnowledgeRetriever()
+    self.prompt_builder = IntelligentPromptBuilder(self.retriever)
+
+def optimize_alpha(self, alpha_data: Dict, temperature: float = 0.5) -> Dict:
+    """使用智能提示词优化 Alpha"""
+
+    analysis = self.analyze_failure(alpha_data)
+    fail_type = analysis["failure_types"][0] if analysis["failure_types"] else "UNKNOWN"
+
+    # 使用智能提示词构建器
+    prompt = self.prompt_builder.build_optimization_prompt(
+        alpha_data=alpha_data,
+        fail_type=fail_type
+    )
+
+    # 调用 LLM
+    optimized = self.llm_client.generate(
+        prompt=prompt,
+        system_prompt=OPTIMIZATION_SYSTEM_PROMPT,
+        temperature=temperature
+    )
+
+    # ... 后续处理 ...</code></pre>
+
+            <h3>6.4 新增启动脚本</h3>
+            <pre><code># scripts/sync_alpha_vectors.py
+
+"""
+Alpha 向量同步启动脚本
+定时将 MySQL 中的 Alpha 数据同步到向量数据库
+"""
+
+import schedule
+import time
+from vector_store.alpha_vector_sync import AlphaVectorSync
+from db.db_connector import DBConnector
+import json
+
+def load_config():
+    with open('db/db_config.json') as f:
+        return json.load(f)
+
+def sync_job():
+    """同步任务"""
+    db = DBConnector(load_config())
+    sync = AlphaVectorSync(db)
+
+    print("开始同步已提交 Alpha...")
+    submitted_count = sync.sync_submitted_alphas()
+    print(f"同步已提交 Alpha: {submitted_count}")
+
+    print("开始同步可提交 Alpha...")
+    submittable_count = sync.sync_submittable_alphas()
+    print(f"同步可提交 Alpha: {submittable_count}")
+
+    print("开始同步失败 Alpha...")
+    failure_count = sync.sync_failure_alphas()
+    print(f"同步失败 Alpha: {failure_count}")
+
+    print("同步完成!")
+
+def main():
+    # 立即执行一次
+    sync_job()
+
+    # 每小时执行增量同步
+    schedule.every(1).hours.do(sync_job)
+
+    # 每天凌晨 3 点全量同步
+    schedule.every().day.at("03:00").do(lambda: AlphaVectorSync(DBConnector(load_config())).full_sync())
+
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+if __name__ == "__main__":
+    main()</code></pre>
+        </section>
+
+        <!-- 七、实施计划 -->
+        <section class="section">
+            <h2>七、实施计划</h2>
+
+            <h3>7.1 开发任务分解</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>阶段</th>
+                        <th>任务</th>
+                        <th>预估工时</th>
+                        <th>优先级</th>
+                        <th>状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td rowspan="4"><strong>Phase 1: 基础设施</strong></td>
+                        <td>创建 Alpha 向量同步服务 (alpha_vector_sync.py)</td>
+                        <td>4h</td>
+                        <td><span class="tag tag-red">P0</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td>扩展 ChromaDB 集合结构</td>
+                        <td>2h</td>
+                        <td><span class="tag tag-red">P0</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td>实现 Alpha 特征提取器 (feature_extractor.py)</td>
+                        <td>3h</td>
+                        <td><span class="tag tag-red">P0</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td>实现权重管理器 (weight_manager.py)</td>
+                        <td>2h</td>
+                        <td><span class="tag tag-red">P0</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td rowspan="4"><strong>Phase 2: 提示词系统</strong></td>
+                        <td>创建智能提示词构建器 (prompt_builder.py)</td>
+                        <td>4h</td>
+                        <td><span class="tag tag-red">P0</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td>设计专家角色提示词模板</td>
+                        <td>2h</td>
+                        <td><span class="tag tag-red">P0</span></td>
+                        <td><span class="tag tag-yellow">⏳ 进行中</span></td>
+                    </tr>
+                    <tr>
+                        <td>设计三阶段提示词模板</td>
+                        <td>2h</td>
+                        <td><span class="tag tag-yellow">P1</span></td>
+                        <td><span class="tag tag-red">❌ 未开始</span></td>
+                    </tr>
+                    <tr>
+                        <td>实现上下文注入逻辑</td>
+                        <td>3h</td>
+                        <td><span class="tag tag-yellow">P1</span></td>
+                        <td><span class="tag tag-red">❌ 未开始</span></td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3"><strong>Phase 3: 集成测试</strong></td>
+                        <td>修改 alpha_generator_ollama.py</td>
+                        <td>2h</td>
+                        <td><span class="tag tag-yellow">P1</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td>修改 alpha_optimizer.py</td>
+                        <td>2h</td>
+                        <td><span class="tag tag-yellow">P1</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td>端到端测试与调优</td>
+                        <td>4h</td>
+                        <td><span class="tag tag-green">P2</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td rowspan="3"><strong>Phase 4: 运维部署</strong></td>
+                        <td>创建定时同步脚本 (scripts/sync_alpha_vectors.py)</td>
+                        <td>1h</td>
+                        <td><span class="tag tag-green">P2</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td>向量数据库管理页面 (vector_db.html)</td>
+                        <td>2h</td>
+                        <td><span class="tag tag-green">P2</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                    <tr>
+                        <td>知识质量监控面板</td>
+                        <td>3h</td>
+                        <td><span class="tag tag-green">P2</span></td>
+                        <td><span class="tag tag-yellow">⏳ 进行中</span></td>
+                    </tr>
+                    <tr>
+                        <td rowspan="2"><strong>Phase 5: 知识采集</strong></td>
+                        <td>论坛帖子批量采集（中期目标）</td>
+                        <td>4h</td>
+                        <td><span class="tag tag-yellow">P1</span></td>
+                        <td><span class="tag tag-red">❌ 未开始</span></td>
+                    </tr>
+                    <tr>
+                        <td>官方文档整理入库</td>
+                        <td>3h</td>
+                        <td><span class="tag tag-yellow">P1</span></td>
+                        <td><span class="tag tag-green">✅ 已完成</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>7.2 文件清单</h3>
+            <div class="file-tree">
+                <div class="folder">vector_store/</div>
+                <div class="file">├── alpha_vector_sync.py    # 新增：Alpha 向量同步服务</div>
+                <div class="file">├── alpha_collections.py    # 新增：Alpha 专用集合管理</div>
+                <div class="file">├── feature_extractor.py    # 新增：表达式特征提取器</div>
+                <br>
+                <div class="folder">generation_one/naive-ollama/</div>
+                <div class="file">├── prompt_builder.py       # 新增：智能提示词构建器</div>
+                <div class="file">├── weight_manager.py       # 新增：权重动态管理器</div>
+                <div class="file">├── alpha_generator_ollama.py  # 修改：集成智能提示词</div>
+                <div class="file">└── alpha_optimizer.py      # 修改：集成智能提示词</div>
+                <br>
+                <div class="folder">scripts/</div>
+                <div class="file">├── sync_alpha_vectors.py   # 新增：定时同步脚本</div>
+                <div class="file">└── collect_forum_posts.py  # 新增：论坛帖子采集脚本</div>
+                <br>
+                <div class="folder">knowledge_base/</div>
+                <div class="file">├── official_docs/          # 新增：官方文档目录</div>
+                <div class="file">└── forum_posts/            # 新增：论坛帖子目录</div>
+            </div>
+
+            <h3>7.3 验收标准</h3>
+            <div class="success-box">
+                <strong>功能验收：</strong>
+                <ul>
+                    <li>✅ 向量数据库包含已提交/可提交/失败 Alpha 集合，数据与 MySQL 同步</li>
+                    <li>✅ 失败 Alpha 支持全量同步（6,712 条）</li>
+                    <li>✅ ChromaDB 使用 PersistentClient 确保数据持久化</li>
+                    <li>✅ Dashboard 页面展示所有向量集合（而非仅 knowledge_chunks）</li>
+                    <li>⏳ 生成提示词包含检索到的成功案例和失败警示</li>
+                    <li>⏳ 优化提示词包含针对性修复建议和相似成功案例</li>
+                    <li>⏳ 定时同步任务正常运行，增量同步延迟 < 1 小时</li>
+                    <li>⏳ 权重管理器能根据知识库状态自动切换阶段</li>
+                </ul>
+            </div>
+
+            <div class="success-box">
+                <strong>性能验收：</strong>
+                <ul>
+                    <li>向量检索延迟 < 100ms</li>
+                    <li>提示词构建延迟 < 500ms</li>
+                    <li>Alpha 生成成功率提升 > 10%</li>
+                    <li>Alpha 优化成功率提升 > 15%</li>
+                </ul>
+            </div>
+
+            <div class="success-box">
+                <strong>渐进式策略验收：</strong>
+                <ul>
+                    <li>短期阶段：专家角色权重 70%，生成成功率 > 10%</li>
+                    <li>中期阶段：知识块 > 1000，外部知识 > 200 条</li>
+                    <li>长期阶段：知识块 > 5000，生成成功率 > 20%</li>
+                    <li>阶段转换自动触发，无需手动干预</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- 八、渐进式知识库建设策略 -->
+        <section class="section">
+            <h2>八、渐进式知识库建设策略</h2>
+
+            <div class="highlight-box">
+                <strong>核心思路：</strong>
+                <p>当前知识库不完善，MySQL 数据仅来自个人大模型生成，缺乏代表性。采用渐进式策略，以专家角色兜底，逐步积累权威数据后降低角色权重。</p>
+            </div>
+
+            <h3>8.1 三阶段演进路线</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>阶段</th>
+                        <th>时间范围</th>
+                        <th>核心策略</th>
+                        <th>角色权重</th>
+                        <th>检索权重</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="tag tag-red">短期</span></td>
+                        <td>1-2 周</td>
+                        <td>专家角色兜底 + 基础检索</td>
+                        <td>70%</td>
+                        <td>30%</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tag tag-yellow">中期</span></td>
+                        <td>2-4 周</td>
+                        <td>持续采集外部知识 + 角色辅助</td>
+                        <td>40%</td>
+                        <td>60%</td>
+                    </tr>
+                    <tr>
+                        <td><span class="tag tag-green">长期</span></td>
+                        <td>4 周+</td>
+                        <td>数据驱动为主 + 角色最小化</td>
+                        <td>20%</td>
+                        <td>80%</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>8.2 短期策略（1-2 周）</h3>
+            <div class="architecture-diagram">
+                <div class="flow-diagram">
+                    <div class="flow-box highlight" style="background: var(--warning-color); color: white;">
+                        <strong>专家角色</strong><br>
+                        <small>70% 权重</small>
+                    </div>
+                    <span class="flow-arrow">+</span>
+                    <div class="flow-box">
+                        <strong>向量检索</strong><br>
+                        <small>30% 权重</small>
+                    </div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">
+                        <strong>提示词</strong><br>
+                        <small>混合输出</small>
+                    </div>
+                </div>
+            </div>
+
+            <h4>专家角色设定</h4>
+            <pre><code>EXPERT_ROLE_PROMPT = """
+你是 WorldQuant Brain 平台的资深量化研究员，拥有 10 年因子研究经验。
+
+## 专业背景
+- 熟悉动量、反转、流动性、质量、价值等主流因子类型
+- 理解截面排名、时间序列操作、行业中性化等核心技术
+- 掌握 Sharpe、Fitness、Turnover 等评估指标的平衡方法
+
+## 核心原则
+1. **外层排名必须**：所有表达式必须使用 rank/ts_rank/group_rank 作为最外层
+2. **市值标准化**：财务数据必须 divide(field, cap) 消除市值影响
+3. **时间窗口合理**：使用 20-120 天范围，避免过短或过长
+4. **权重分散**：确保 CONCENTRATED_WEIGHT 检查通过
+
+## 生成策略
+- 优先使用检索到的成功案例模式（如有）
+- 如无相关检索结果，使用你的专业知识生成
+- 始终遵循平台语法规范和检查要求
+"""</code></pre>
+
+            <h4>短期提示词模板</h4>
+            <pre><code>SHORT_TERM_PROMPT_TEMPLATE = """
+{expert_role}
+
+## 检索参考（如有相关数据）
+{retrieved_context}
+
+## 当前任务
+- 数据字段: {data_fields}
+- 目标数量: {count}
+
+## 输出要求
+每行一个表达式，不要编号、注释或解释。
+"""</code></pre>
+
+            <h3>8.3 中期策略（2-4 周）</h3>
+            <p><strong>目标：</strong>持续采集外部权威知识，逐步提升检索权重</p>
+
+            <h4>外部知识源采集计划</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>知识源</th>
+                        <th>采集方式</th>
+                        <th>预期数量</th>
+                        <th>优先级</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>WorldQuant Brain 论坛精华帖</td>
+                        <td>forum_fetcher（已有）</td>
+                        <td>200+ 帖子</td>
+                        <td><span class="tag tag-red">P0</span></td>
+                    </tr>
+                    <tr>
+                        <td>官方文档和教程</td>
+                        <td>手动整理 + 向量化</td>
+                        <td>50+ 文档</td>
+                        <td><span class="tag tag-red">P0</span></td>
+                    </tr>
+                    <tr>
+                        <td>官方示例 Alpha</td>
+                        <td>从平台提取</td>
+                        <td>100+ 示例</td>
+                        <td><span class="tag tag-yellow">P1</span></td>
+                    </tr>
+                    <tr>
+                        <td>学术论文因子研究</td>
+                        <td>手动提炼关键结论</td>
+                        <td>30+ 论文摘要</td>
+                        <td><span class="tag tag-green">P2</span></td>
+                    </tr>
+                    <tr>
+                        <td>其他量化平台经验</td>
+                        <td>QuantConnect 等开源策略</td>
+                        <td>50+ 策略模式</td>
+                        <td><span class="tag tag-green">P2</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>中期提示词模板</h4>
+            <pre><code>MID_TERM_PROMPT_TEMPLATE = """
+你是 WorldQuant Brain 量化研究员，参考以下知识库内容生成 Alpha。
+
+## 知识库检索结果（优先参考）
+{retrieved_context}
+
+## 专业补充（当检索不足时使用）
+{expert_knowledge}
+
+## 当前任务
+- 数据字段: {data_fields}
+- 目标数量: {count}
+
+## 输出要求
+每行一个表达式，不要编号、注释或解释。
+"""</code></pre>
+
+            <h3>8.4 长期策略（4 周+）</h3>
+            <p><strong>目标：</strong>数据驱动为主，专家角色仅作为边界约束</p>
+
+            <div class="success-box">
+                <strong>达成条件：</strong>
+                <ul>
+                    <li>向量知识块 > 5,000 条</li>
+                    <li>成功 Alpha 案例 > 500 条</li>
+                    <li>优化成功案例 > 200 条</li>
+                    <li>外部知识覆盖主流因子类型</li>
+                </ul>
+            </div>
+
+            <h4>长期提示词模板</h4>
+            <pre><code>LONG_TERM_PROMPT_TEMPLATE = """
+基于知识库生成 Alpha 表达式。
+
+## 成功案例参考（检索自向量库）
+{success_cases}
+
+## 失败模式警示（避免以下特征）
+{failure_patterns}
+
+## 推荐字段组合
+{field_combos}
+
+## 基础约束（必须遵守）
+- 外层必须使用 rank/ts_rank/group_rank
+- 财务数据必须市值标准化
+- 时间窗口 20-120 天
+
+## 当前任务
+- 数据字段: {data_fields}
+- 目标数量: {count}
+
+## 输出要求
+每行一个表达式，不要编号、注释或解释。
+"""</code></pre>
+
+            <h3>8.5 权重动态调整机制</h3>
+            <pre><code># prompt_builder.py 中的权重管理
+
+class PromptWeightManager:
+    """提示词权重动态管理"""
+
+    def __init__(self):
+        self.phase = "short"  # short / mid / long
+        self.weights = {
+            "short": {"expert": 0.7, "retrieval": 0.3},
+            "mid": {"expert": 0.4, "retrieval": 0.6},
+            "long": {"expert": 0.2, "retrieval": 0.8}
+        }
+
+    def get_current_weights(self) -> dict:
+        """获取当前权重配置"""
+        return self.weights[self.phase]
+
+    def check_phase_transition(self, stats: dict) -> str:
+        """检查是否需要阶段转换"""
+        # 中期条件：知识块 > 1000 或 外部知识 > 200
+        if self.phase == "short":
+            if stats["total_chunks"] > 1000 or stats["external_knowledge"] > 200:
+                self.phase = "mid"
+                return "transition_to_mid"
+
+        # 长期条件：知识块 > 5000 且 成功案例 > 500
+        if self.phase == "mid":
+            if stats["total_chunks"] > 5000 and stats["success_cases"] > 500:
+                self.phase = "long"
+                return "transition_to_long"
+
+        return "no_transition"
+
+    def build_prompt(self, retrieved_context: str, expert_knowledge: str) -> str:
+        """根据权重构建提示词"""
+        weights = self.get_current_weights()
+
+        if weights["retrieval"] >= weights["expert"]:
+            # 检索优先模式
+            return LONG_TERM_PROMPT_TEMPLATE.format(
+                retrieved_context=retrieved_context,
+                expert_knowledge=expert_knowledge,
+                ...
+            )
+        else:
+            # 专家优先模式
+            return SHORT_TERM_PROMPT_TEMPLATE.format(
+                expert_role=EXPERT_ROLE_PROMPT,
+                retrieved_context=retrieved_context,
+                ...
+            )</code></pre>
+
+            <h3>8.6 知识库质量监控</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>监控指标</th>
+                        <th>计算方式</th>
+                        <th>目标值</th>
+                        <th>触发动作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>检索命中率</td>
+                        <td>检索返回结果数 / 请求数</td>
+                        <td>> 80%</td>
+                        <td>< 50% 时增加知识采集</td>
+                    </tr>
+                    <tr>
+                        <td>检索相似度均值</td>
+                        <td>返回结果的平均相似度</td>
+                        <td>> 0.5</td>
+                        <td>< 0.3 时优化向量化策略</td>
+                    </tr>
+                    <tr>
+                        <td>Alpha 生成成功率</td>
+                        <td>通过 IS 检查数 / 生成数</td>
+                        <td>> 15%</td>
+                        <td>持续低于目标时调整权重</td>
+                    </tr>
+                    <tr>
+                        <td>外部知识占比</td>
+                        <td>外部知识块 / 总知识块</td>
+                        <td>> 30%</td>
+                        <td>低于目标时加速采集</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 九、风险与对策 -->
+        <section class="section">
+            <h2>九、风险与对策</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>风险</th>
+                        <th>影响</th>
+                        <th>概率</th>
+                        <th>对策</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>向量检索质量不佳</td>
+                        <td>提示词包含无关信息</td>
+                        <td>中</td>
+                        <td>优化向量化文本，增加特征权重；调整相似度阈值</td>
+                    </tr>
+                    <tr>
+                        <td>同步延迟导致数据不一致</td>
+                        <td>使用过时案例</td>
+                        <td>低</td>
+                        <td>增加同步频率；关键操作前强制同步</td>
+                    </tr>
+                    <tr>
+                        <td>向量数据库存储膨胀</td>
+                        <td>检索性能下降</td>
+                        <td>中</td>
+                        <td>定期清理低质量数据；设置 TTL</td>
+                    </tr>
+                    <tr>
+                        <td>提示词过长超出 LLM 上下文</td>
+                        <td>信息被截断</td>
+                        <td>低</td>
+                        <td>动态调整检索数量；摘要压缩</td>
+                    </tr>
+                    <tr>
+                        <td>专家角色过度自信</td>
+                        <td>生成无效表达式</td>
+                        <td>中</td>
+                        <td>短期阶段加强约束规则；中期逐步降低角色权重</td>
+                    </tr>
+                    <tr>
+                        <td>外部知识采集困难</td>
+                        <td>中期目标无法达成</td>
+                        <td>中</td>
+                        <td>优先采集论坛帖子；手动整理官方文档作为备选</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 九、附录 -->
+        <section class="section">
+            <h2>九、附录</h2>
+
+            <h3>9.1 现有资源统计</h3>
+            <div class="highlight-box">
+                <strong>数据来源：</strong> 实际数据库查询结果（2026-05-17）
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>资源类型</th>
+                        <th>数量</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>MySQL Alpha 记录</td>
+                        <td>6,798</td>
+                        <td>包含 IS/OS 性能指标和检查结果</td>
+                    </tr>
+                    <tr>
+                        <td>可提交 Alpha（IS 检查 7 PASS）</td>
+                        <td>68</td>
+                        <td>status=UNSUBMITTED, 检查全部通过</td>
+                    </tr>
+                    <tr>
+                        <td>可优化 Alpha（IS 检查 6 PASS 1 FAIL）</td>
+                        <td>200+</td>
+                        <td>有针对性修复空间</td>
+                    </tr>
+                    <tr>
+                        <td>已提交 Alpha</td>
+                        <td>18</td>
+                        <td>status=SUBMITTED</td>
+                    </tr>
+                    <tr>
+                        <td>向量知识块（knowledge_chunks）</td>
+                        <td>1,918</td>
+                        <td>来自知识库文档和论坛帖子</td>
+                    </tr>
+                    <tr>
+                        <td>知识库文件</td>
+                        <td>~10</td>
+                        <td>MD/JSON 格式的参考资料</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>失败类型分布（实际统计）</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>失败类型</th>
+                        <th>数量</th>
+                        <th>占比</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>LOW_FITNESS</td>
+                        <td>6,445</td>
+                        <td>39.1%</td>
+                    </tr>
+                    <tr>
+                        <td>LOW_SHARPE</td>
+                        <td>6,332</td>
+                        <td>38.4%</td>
+                    </tr>
+                    <tr>
+                        <td>LOW_SUB_UNIVERSE_SHARPE</td>
+                        <td>1,995</td>
+                        <td>12.1%</td>
+                    </tr>
+                    <tr>
+                        <td>CONCENTRATED_WEIGHT</td>
+                        <td>1,171</td>
+                        <td>7.1%</td>
+                    </tr>
+                    <tr>
+                        <td>LOW_TURNOVER</td>
+                        <td>352</td>
+                        <td>2.1%</td>
+                    </tr>
+                    <tr>
+                        <td>HIGH_TURNOVER</td>
+                        <td>184</td>
+                        <td>1.1%</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>成功 Alpha 特征统计（20 个样本）</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>特征</th>
+                        <th>占比</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>外层排名 (rank/ts_rank/group_rank)</td>
+                        <td>90%</td>
+                        <td>通过 CONCENTRATED_WEIGHT 检查的关键</td>
+                    </tr>
+                    <tr>
+                        <td>市值标准化 (divide(field, cap))</td>
+                        <td>100%</td>
+                        <td>财务数据必须项</td>
+                    </tr>
+                    <tr>
+                        <td>行业中性化 (group_neutralize)</td>
+                        <td>35%</td>
+                        <td>提升 SUB_UNIVERSE_SHARPE</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>9.2 关键配置参数</h3>
+            <pre><code># vector_store/config.py 扩展配置
+
+# Alpha 向量化配置
+ALPHA_VECTOR_CONFIG = {
+    # 成功 Alpha 集合
+    "success_collection": "alpha_success_patterns",
+    "success_min_sharpe": 1.5,
+    "success_min_fitness": 1.0,
+
+    # 失败 Alpha 集合
+    "failure_collection": "alpha_failure_patterns",
+    "failure_max_sharpe": 2.0,  # 高 Sharpe 但失败的更有价值
+
+    # 优化案例集合
+    "optimization_collection": "alpha_optimization_cases",
+
+    # 字段组合集合
+    "field_combo_collection": "field_combinations",
+
+    # 同步配置
+    "sync_batch_size": 100,
+    "sync_interval_minutes": 60,
+}
+
+# 提示词构建配置
+PROMPT_BUILD_CONFIG = {
+    "success_cases_top_k": 5,
+    "failure_patterns_top_k": 3,
+    "field_combos_top_k": 3,
+    "optimization_cases_top_k": 5,
+    "max_prompt_length": 8000,  # 字符数
+}
+
+# 渐进式知识库配置
+PROGRESSIVE_KB_CONFIG = {
+    # 阶段权重配置
+    "phase_weights": {
+        "short": {"expert": 0.7, "retrieval": 0.3},
+        "mid": {"expert": 0.4, "retrieval": 0.6},
+        "long": {"expert": 0.2, "retrieval": 0.8}
+    },
+
+    # 阶段转换条件
+    "phase_transition": {
+        "short_to_mid": {
+            "min_chunks": 1000,
+            "min_external_knowledge": 200
+        },
+        "mid_to_long": {
+            "min_chunks": 5000,
+            "min_success_cases": 500,
+            "min_optimization_cases": 200
+        }
+    },
+
+    # 知识质量监控阈值
+    "quality_thresholds": {
+        "min_retrieval_hit_rate": 0.8,
+        "min_avg_similarity": 0.5,
+        "min_alpha_success_rate": 0.15,
+        "min_external_knowledge_ratio": 0.3
+    }
+}</code></pre>
+
+            <h3>9.3 参考文档</h3>
+            <ul>
+                <li><code>vector_store/README.md</code> - 向量数据库使用指南</li>
+                <li><code>db/migrations/001_init.sql</code> - 数据库表结构</li>
+                <li><code>knowledge_base/worldquantbrain_alpha_guide.md</code> - Alpha 开发指南</li>
+                <li><code>knowledge_base/worldquant_community_knowledge.md</code> - 社区知识精华</li>
+            </ul>
+        </section>
+
+        <footer style="text-align: center; padding: 30px; color: var(--text-muted); border-top: 1px solid var(--border-color); margin-top: 30px;">
+            <p>WorldQuant Miner 智能提示词系统实现方案 v1.2</p>
+            <p>更新时间: 2026-05-17 | 修正：基于实际数据库分析的数据和结构</p>
+        </footer>
+    </div>
+</body>
+</html>

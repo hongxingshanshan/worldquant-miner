@@ -13,6 +13,13 @@ try:
 except ImportError:
     logger = logging.getLogger(__name__)
 
+# 尝试导入智能提示词构建器
+try:
+    from prompt_builder import IntelligentPromptBuilder
+    PROMPT_BUILDER_AVAILABLE = True
+except ImportError:
+    PROMPT_BUILDER_AVAILABLE = False
+
 # 优化系统提示词
 OPTIMIZATION_SYSTEM_PROMPT = """
 你是一个 WorldQuant Brain Alpha 表达式优化专家。
@@ -200,6 +207,15 @@ class AlphaOptimizer:
             "successful": 0,
             "failed": 0
         }
+
+        # 初始化智能提示词构建器
+        self.prompt_builder = None
+        if PROMPT_BUILDER_AVAILABLE:
+            try:
+                self.prompt_builder = IntelligentPromptBuilder()
+                logger.info("优化器: 智能提示词构建器初始化成功")
+            except Exception as e:
+                logger.warning(f"优化器: 智能提示词构建器初始化失败: {e}")
 
     def set_query_service(self, query_service):
         """设置数据库查询服务"""
@@ -748,7 +764,23 @@ class AlphaOptimizer:
         Returns:
             提示词字符串
         """
-        # 构建失败详情描述
+        # 尝试使用智能提示词构建器
+        if self.prompt_builder:
+            try:
+                fail_type = analysis.get("failure_types", ["UNKNOWN"])[0]
+                alpha_data = {
+                    "expression": analysis["expression"],
+                    "sharpe": analysis["sharpe"],
+                    "fitness": analysis["fitness"],
+                    "turnover": analysis["turnover"]
+                }
+                prompt = self.prompt_builder.build_optimization_prompt(alpha_data, fail_type)
+                logger.info(f"使用智能提示词构建器生成优化提示词 (失败类型: {fail_type})")
+                return prompt
+            except Exception as e:
+                logger.warning(f"智能提示词构建失败: {e}, 使用传统方法")
+
+        # 传统方法：构建失败详情描述
         failure_details = analysis.get("failure_details", [])
         if failure_details:
             details_text = "\n".join(f"- {d}" for d in failure_details)

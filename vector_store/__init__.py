@@ -16,6 +16,9 @@ from .browser_integration import (
     process_browser_snapshot,
     search_knowledge
 )
+from .feature_extractor import AlphaFeatureExtractor
+from .weight_manager import PromptWeightManager, Phase
+from .alpha_vector_sync import AlphaVectorSync
 
 __all__ = [
     'VectorStore',
@@ -26,5 +29,9 @@ __all__ = [
     'ForumFetcher',
     'BrowserFetchIntegration',
     'process_browser_snapshot',
-    'search_knowledge'
+    'search_knowledge',
+    'AlphaFeatureExtractor',
+    'PromptWeightManager',
+    'Phase',
+    'AlphaVectorSync'
 ]

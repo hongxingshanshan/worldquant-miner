@@ -34,6 +34,15 @@ try:
 except ImportError:
     LLM_CLIENT_AVAILABLE = False
 
+# 尝试导入智能提示词构建器
+try:
+    from prompt_builder import IntelligentPromptBuilder
+    PROMPT_BUILDER_AVAILABLE = True
+except ImportError as e:
+    PROMPT_BUILDER_AVAILABLE = False
+    import logging
+    logging.getLogger(__name__).warning(f"智能提示词构建器导入失败: {e}")
+
 # 尝试导入优化器和队列
 try:
     from alpha_optimizer import AlphaOptimizer
@@ -117,6 +126,18 @@ class AlphaGenerator:
         self.alpha_queue = None
         self.optimization_enabled = False
         self.consumer_thread = None  # 消费者线程
+
+        # 初始化智能提示词构建器
+        self.prompt_builder = None
+        logger.info(f"PROMPT_BUILDER_AVAILABLE: {PROMPT_BUILDER_AVAILABLE}")
+        if PROMPT_BUILDER_AVAILABLE:
+            try:
+                self.prompt_builder = IntelligentPromptBuilder()
+                logger.info("✅ 智能提示词构建器初始化成功")
+            except Exception as e:
+                logger.warning(f"智能提示词构建器初始化失败: {e}")
+                import traceback
+                logger.warning(traceback.format_exc())
 
         logger.info(f"OPTIMIZER_AVAILABLE: {OPTIMIZER_AVAILABLE}, llm_client: {self.llm_client is not None}")
 
@@ -408,7 +429,7 @@ class AlphaGenerator:
         return cleaned_ideas
 
     def generate_alpha_ideas_with_ollama(self, data_fields: List[Dict], operators: List[Dict]) -> List[str]:
-        """Generate alpha ideas using LLM (Ollama or online model)."""
+        """Generate alpha ideas using LLM (Ollama or online model) with intelligent prompt builder."""
         logger.info(f"开始生成 Alpha 想法 - 数据字段: {len(data_fields)}, 操作符: {len(operators)}")
 
         operator_by_category = {}
@@ -437,7 +458,16 @@ class AlphaGenerator:
                 sampled_operators[category] = random.sample(ops, sample_size)
 
             logger.info("准备 LLM 提示词...")
-            # Format operators with their types, definitions, and descriptions
+
+            # 获取每轮生成数量配置
+            generate_count = self.optimization_config.get('generate_per_cycle', 20)
+
+            # 获取采样的数据字段 ID
+            sampled_field_ids = get_sampled_field_ids(max_fields=100, randomize=True)
+            if not sampled_field_ids:
+                sampled_field_ids = [field['id'] for field in data_fields]
+
+            # 构建操作符格式化字符串（用于 fallback）
             def format_operators(ops):
                 formatted = []
                 for op in ops:
@@ -446,136 +476,37 @@ class AlphaGenerator:
                                    f"  Description: {op['description']}")
                 return formatted
 
-            # 获取最近的错误信息，供大模型参考
-            recent_errors = self.get_simulation_errors()[-10:]  # 最近 10 条错误
-            error_context = ""
-            if recent_errors:
-                error_context = "\n\nRecent Errors to Avoid:\n"
-                for err in recent_errors[-5:]:  # 只显示最近 5 条
-                    error_context += f"- {err.get('expression', '')[:60]}...\n"
-                    error_context += f"  Error: {err.get('error_message', 'Unknown')}\n"
-
-            # 加载知识库（随机选择章节）
-            knowledge_base = load_knowledge_base(randomize=True)
-            knowledge_context = ""
-            if knowledge_base:
-                knowledge_context = f"\n\n### WorldQuant Brain Knowledge Base:\n{knowledge_base}\n"
-
-            # 加载数据字段参考（随机选择字段）
-            data_fields_ref = load_data_fields_reference(max_fields=80, randomize=True)
-            fields_ref_context = ""
-            if data_fields_ref:
-                fields_ref_context = f"\n\n### High-COverage Data Fields (Recommended):\n{data_fields_ref}\n"
-
-            # 加载已提交的 alpha（从 WQ API）
-            submitted_alphas = load_submitted_alphas(self.sess, max_alphas=10)
-            submitted_context = ""
-            if submitted_alphas:
-                submitted_context = "\n\n### Previously Submitted Alphas (Reference):\n"
-                for i, alpha in enumerate(submitted_alphas[:5], 1):
-                    submitted_context += f"{i}. {alpha['expression'][:80]}\n"
-                    submitted_context += f"   Fitness: {alpha.get('fitness', 'N/A'):.3f}"
-                    if alpha.get('dateSubmitted'):
-                        submitted_context += f", Submitted: {alpha['dateSubmitted'][:10]}"
-                    submitted_context += "\n"
-
-            # 获取随机策略提示
-            strategy_hints = get_random_strategy_hints()
-
-            # 获取随机示例格式
-            example_format = get_random_example_format()
-
-            # 获取采样的数据字段 ID（随机从高覆盖率字段中选择）
-            sampled_field_ids = get_sampled_field_ids(max_fields=100, randomize=True)
-            if not sampled_field_ids:
-                # fallback: 使用全部字段
-                sampled_field_ids = [field['id'] for field in data_fields]
-
-            # 获取每轮生成数量配置
-            generate_count = self.optimization_config.get('generate_per_cycle', 20)
-
-            prompt = f"""Generate {generate_count} unique alpha factor expressions using the available operators and data fields. Return ONLY the expressions, one per line, with no comments or explanations.
-
-Available Data Fields (Sampled {len(sampled_field_ids)} high-coverage fields):
-{sampled_field_ids}
-
-Available Operators by Category:
-Time Series:
-{chr(10).join(format_operators(sampled_operators.get('Time Series', [])))}
-
-Cross Sectional:
-{chr(10).join(format_operators(sampled_operators.get('Cross Sectional', [])))}
-
-Arithmetic:
-{chr(10).join(format_operators(sampled_operators.get('Arithmetic', [])))}
-
-Logical:
-{chr(10).join(format_operators(sampled_operators.get('Logical', [])))}
-
-Vector:
-{chr(10).join(format_operators(sampled_operators.get('Vector', [])))}
-
-Transformational:
-{chr(10).join(format_operators(sampled_operators.get('Transformational', [])))}
-
-Group:
-{chr(10).join(format_operators(sampled_operators.get('Group', [])))}
-{error_context}{knowledge_context}{fields_ref_context}{submitted_context}
-Requirements:
-1. Let your intuition guide you.
-2. Use the operators and data fields to create a unique and potentially profitable alpha factor.
-3. Anything is possible 42.
-4. Avoid using event-type data fields (like nws12_*, fnd6_newqeventv*) with time series operators (ts_rank, ts_sum, etc.) as they don't support event inputs.
-
-Critical Success Patterns :
-1. ALWAYS wrap expression with rank() / ts_rank() / group_rank() as the outermost operator - this ensures weight distribution and passes CONCENTRATED_WEIGHT check.
-2. For fundamental data, use divide(field, cap) for market cap normalization - makes factor size-neutral.
-3. Use group_neutralize(expr, industry) for industry neutralization - improves SUB_UNIVERSE_SHARPE.
-4. Time window parameters: use 20-120 days (common: 20, 60, 120).
-5. Target Turnover range: 0.15-0.45 (avoid too low or too high).
-
-Advanced Techniques (from WorldQuant Brain Guide):
-1. Neutralization Options:
-   - group_neutralize(expr, industry) - industry neutralization
-   - group_neutralize(expr, sector) - sector neutralization
-   - group_neutralize(expr, subindustry) - subindustry neutralization
-   - regression_neut(expr, factor) - regression neutralization for Size, Beta, Momentum
-
-2. Position Distribution Operators:
-   - rank(expr) - uniform distribution (recommended)
-   - signed_power(expr, 0.5-0.8) - more extreme distribution, higher volatility
-   - log(1 + abs(expr)) * sign(expr) - log distribution
-
-3. Alpha Synergy (combine multiple signals):
-   - Trade_when(A1 > x, A2, A1 <= x) - conditional combination
-   - Avoid simple linear combinations like 3*A1 + 4*A2 (bad for diversification)
-
-Proven Templates:
-- rank(ts_zscore(divide(fundamental_field, cap), 40-80))
-- ts_rank(divide(market_field, cap), 60)
-- group_neutralize(ts_decay_linear(ts_rank(signal_field, 20-60), 5-10), industry)
-- group_rank(ts_rank(ratio_field, 60), industry)
-- signed_power(group_neutralize(expr, industry), 0.6)
-
-Overfitting Warnings:
-- Do NOT fine-tune too many details to increase In-Sample performance - leads to poor Out-Sample performance.
-- Do NOT concentrate positions in few instruments - use rank() to distribute weights.
-- Focus on economic significance and robustness, not just high fitness scores.
-
-Tips:
-- You can use semi-colons to separate expressions.
-- Pay attention to operator types (SCALAR, VECTOR, MATRIX) for compatibility.
-- Study the operator definitions and descriptions to understand their behavior.
-- Avoid the error patterns shown in "Recent Errors to Avoid" section.
-- Use the knowledge base above to create better alpha expressions.
-- Learn from the successful patterns - they have high fitness scores.
-- Reference submitted alphas for style and complexity guidance.
-
-Strategy Suggestions (pick one or combine):
-{strategy_hints}
-
-{example_format}
-"""
+            # 尝试使用智能提示词构建器
+            if self.prompt_builder:
+                try:
+                    logger.info("使用智能提示词构建器...")
+                    prompt = self.prompt_builder.build_generation_prompt(
+                        data_fields=sampled_field_ids,
+                        operators=sampled_operators,
+                        context={
+                            'count': generate_count,
+                            'operators_formatted': {
+                                'Time Series': format_operators(sampled_operators.get('Time Series', [])),
+                                'Cross Sectional': format_operators(sampled_operators.get('Cross Sectional', [])),
+                                'Arithmetic': format_operators(sampled_operators.get('Arithmetic', [])),
+                                'Logical': format_operators(sampled_operators.get('Logical', [])),
+                                'Vector': format_operators(sampled_operators.get('Vector', [])),
+                                'Transformational': format_operators(sampled_operators.get('Transformational', [])),
+                                'Group': format_operators(sampled_operators.get('Group', []))
+                            }
+                        }
+                    )
+                    logger.info(f"智能提示词构建完成，阶段: {self.prompt_builder.weight_manager.get_current_phase()}")
+                except Exception as e:
+                    logger.warning(f"智能提示词构建失败: {e}, 使用传统方法")
+                    prompt = self._build_fallback_prompt(
+                        sampled_field_ids, sampled_operators, format_operators, generate_count
+                    )
+            else:
+                logger.info("智能提示词构建器未初始化，使用传统方法")
+                prompt = self._build_fallback_prompt(
+                    sampled_field_ids, sampled_operators, format_operators, generate_count
+                )
 
             # 系统提示词（用于线上模型）
             system_prompt = """你是一个量化金融专家，专门生成 Alpha 因子表达式。
@@ -627,6 +558,115 @@ Strategy Suggestions (pick one or combine):
                 self._hit_token_limit = True
             logger.error(f"Error generating alpha ideas: {str(e)}")
             return []
+
+    def _build_fallback_prompt(
+        self,
+        sampled_field_ids: List[str],
+        sampled_operators: Dict,
+        format_operators,
+        generate_count: int
+    ) -> str:
+        """
+        构建传统提示词（当智能提示词构建器不可用时的后备方案）
+
+        Args:
+            sampled_field_ids: 采样的数据字段 ID
+            sampled_operators: 采样的操作符
+            format_operators: 操作符格式化函数
+            generate_count: 生成数量
+
+        Returns:
+            构建好的提示词
+        """
+        # 获取最近的错误信息，供大模型参考
+        recent_errors = self.get_simulation_errors()[-10:]
+        error_context = ""
+        if recent_errors:
+            error_context = "\n\nRecent Errors to Avoid:\n"
+            for err in recent_errors[-5:]:
+                error_context += f"- {err.get('expression', '')[:60]}...\n"
+                error_context += f"  Error: {err.get('error_message', 'Unknown')}\n"
+
+        # 加载知识库（随机选择章节）
+        knowledge_base = load_knowledge_base(randomize=True)
+        knowledge_context = ""
+        if knowledge_base:
+            knowledge_context = f"\n\n### WorldQuant Brain Knowledge Base:\n{knowledge_base}\n"
+
+        # 加载数据字段参考
+        data_fields_ref = load_data_fields_reference(max_fields=80, randomize=True)
+        fields_ref_context = ""
+        if data_fields_ref:
+            fields_ref_context = f"\n\n### High-Coverage Data Fields (Recommended):\n{data_fields_ref}\n"
+
+        # 加载已提交的 alpha
+        submitted_alphas = load_submitted_alphas(self.sess, max_alphas=10)
+        submitted_context = ""
+        if submitted_alphas:
+            submitted_context = "\n\n### Previously Submitted Alphas (Reference):\n"
+            for i, alpha in enumerate(submitted_alphas[:5], 1):
+                submitted_context += f"{i}. {alpha['expression'][:80]}\n"
+                submitted_context += f"   Fitness: {alpha.get('fitness', 'N/A'):.3f}"
+                if alpha.get('dateSubmitted'):
+                    submitted_context += f", Submitted: {alpha['dateSubmitted'][:10]}"
+                submitted_context += "\n"
+
+        # 获取随机策略提示
+        strategy_hints = get_random_strategy_hints()
+        example_format = get_random_example_format()
+
+        prompt = f"""Generate {generate_count} unique alpha factor expressions using the available operators and data fields. Return ONLY the expressions, one per line, with no comments or explanations.
+
+Available Data Fields (Sampled {len(sampled_field_ids)} high-coverage fields):
+{sampled_field_ids}
+
+Available Operators by Category:
+Time Series:
+{chr(10).join(format_operators(sampled_operators.get('Time Series', [])))}
+
+Cross Sectional:
+{chr(10).join(format_operators(sampled_operators.get('Cross Sectional', [])))}
+
+Arithmetic:
+{chr(10).join(format_operators(sampled_operators.get('Arithmetic', [])))}
+
+Logical:
+{chr(10).join(format_operators(sampled_operators.get('Logical', [])))}
+
+Vector:
+{chr(10).join(format_operators(sampled_operators.get('Vector', [])))}
+
+Transformational:
+{chr(10).join(format_operators(sampled_operators.get('Transformational', [])))}
+
+Group:
+{chr(10).join(format_operators(sampled_operators.get('Group', [])))}
+{error_context}{knowledge_context}{fields_ref_context}{submitted_context}
+Requirements:
+1. Let your intuition guide you.
+2. Use the operators and data fields to create a unique and potentially profitable alpha factor.
+3. Anything is possible 42.
+4. Avoid using event-type data fields (like nws12_*, fnd6_newqeventv*) with time series operators (ts_rank, ts_sum, etc.) as they don't support event inputs.
+
+Critical Success Patterns:
+1. ALWAYS wrap expression with rank() / ts_rank() / group_rank() as the outermost operator - this ensures weight distribution and passes CONCENTRATED_WEIGHT check.
+2. For fundamental data, use divide(field, cap) for market cap normalization - makes factor size-neutral.
+3. Use group_neutralize(expr, industry) for industry neutralization - improves SUB_UNIVERSE_SHARPE.
+4. Time window parameters: use 20-120 days (common: 20, 60, 120).
+5. Target Turnover range: 0.15-0.45 (avoid too low or too high).
+
+Proven Templates:
+- rank(ts_zscore(divide(fundamental_field, cap), 40-80))
+- ts_rank(divide(market_field, cap), 60)
+- group_neutralize(ts_decay_linear(ts_rank(signal_field, 20-60), 5-10), industry)
+- group_rank(ts_rank(ratio_field, 60), industry)
+
+Strategy Suggestions:
+{strategy_hints}
+
+{example_format}
+"""
+        return prompt
 
     def _handle_llm_error(self, error_type: str):
         """Handle LLM errors by downgrading model if needed (only for Ollama)."""

@@ -81,6 +81,69 @@
             color: #667eea;
         }
 
+        /* 集合卡片 */
+        .collection-card {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 180px;
+        }
+
+        .collection-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+
+        .collection-card.success {
+            border-left: 4px solid #10b981;
+        }
+
+        .collection-card.primary {
+            border-left: 4px solid #667eea;
+        }
+
+        .collection-card.danger {
+            border-left: 4px solid #ef4444;
+        }
+
+        .collection-card.default {
+            border-left: 4px solid #94a3b8;
+        }
+
+        /* 集合信息徽章 */
+        .collection-info-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 10px;
+        }
+
+        .collection-info-badge.active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .collection-info-badge.empty {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .collection-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .collection-count {
+            font-size: 13px;
+            color: #666;
+        }
+
         /* 筛选区域 */
         .filter-section {
             background: rgba(255, 255, 255, 0.95);
@@ -686,10 +749,6 @@
         <!-- 统计区域 -->
         <div class="stats-section">
             <div class="stat-item">
-                <span class="label">📦 集合名称:</span>
-                <span class="value" id="collectionName">-</span>
-            </div>
-            <div class="stat-item">
                 <span class="label">📊 总记录数:</span>
                 <span class="value" id="totalCount">-</span>
             </div>
@@ -703,12 +762,26 @@
             </div>
         </div>
 
+        <!-- 集合选择 -->
+        <div class="stats-section" style="flex-direction: column; align-items: flex-start;">
+            <h3 style="margin-bottom: 10px; color: #333;">📦 选择集合</h3>
+            <div class="filter-group" style="width: 100%;">
+                <label style="font-size: 14px;">当前集合:</label>
+                <select id="collectionSelect" style="width: 300px; padding: 10px; font-size: 14px;">
+                    <option value="">-- 请选择集合 --</option>
+                </select>
+            </div>
+            <div id="collectionsList" style="display: flex; flex-wrap: wrap; gap: 15px; width: 100%; margin-top: 15px;">
+                <!-- 动态填充 -->
+            </div>
+        </div>
+
         <!-- 标签页 -->
         <div class="tabs-section">
             <div class="tabs-header">
-                <button class="tab-btn active" onclick="switchTab('browse')">📋 数据浏览</button>
-                <button class="tab-btn" onclick="switchTab('filter')">🔍 条件查询</button>
-                <button class="tab-btn" onclick="switchTab('search')">🔎 语义搜索</button>
+                <button class="tab-btn active" data-tab="browse" onclick="switchTab('browse', this)">📋 数据浏览</button>
+                <button class="tab-btn" data-tab="filter" onclick="switchTab('filter', this)">🔍 条件查询</button>
+                <button class="tab-btn" data-tab="search" onclick="switchTab('search', this)">🔎 语义搜索</button>
             </div>
 
             <!-- 数据浏览 -->
@@ -726,6 +799,7 @@
                     <button class="btn btn-primary" onclick="browseData()">
                         <span>📋</span> 浏览数据
                     </button>
+                    <span id="currentCollectionInfo" class="collection-info-badge"></span>
                 </div>
             </div>
 
@@ -733,21 +807,15 @@
             <div id="tab-filter" class="tab-content">
                 <div class="filter-section">
                     <div class="filter-group">
-                        <label>层级 (layer):</label>
-                        <select id="filterLayer">
-                            <option value="">全部</option>
-                            <option value="community_knowledge">community_knowledge</option>
-                            <option value="technical_methods">technical_methods</option>
-                            <option value="basic_concepts">basic_concepts</option>
+                        <label>筛选字段:</label>
+                        <select id="filterField">
+                            <!-- 动态填充 -->
                         </select>
                     </div>
                     <div class="filter-group">
-                        <label>分类 (category):</label>
-                        <select id="filterCategory">
+                        <label>筛选值:</label>
+                        <select id="filterValue">
                             <option value="">全部</option>
-                            <option value="forum_post">forum_post</option>
-                            <option value="general">general</option>
-                            <option value="data_fields">data_fields</option>
                         </select>
                     </div>
                     <div class="filter-group">
@@ -762,6 +830,7 @@
                     <button class="btn btn-primary" onclick="filterData()">
                         <span>🔍</span> 条件查询
                     </button>
+                    <span id="filterCollectionInfo" class="collection-info-badge"></span>
                 </div>
             </div>
 
@@ -771,6 +840,7 @@
                     <div class="search-header">
                         <h4>🔎 语义搜索</h4>
                         <p>输入关键词，通过向量相似度搜索相关知识内容（支持中英文）</p>
+                        <span id="searchCollectionInfo" class="collection-info-badge"></span>
                     </div>
                     <div class="search-input-wrapper">
                         <label>搜索内容:</label>
@@ -863,10 +933,65 @@
         let totalPagesNum = 1;
         let currentResults = [];
         let isSearchMode = false;
+        let currentCollection = '';
+        let allCollections = [];
+
+        // 集合筛选字段配置
+        const collectionFilterConfig = {
+            'knowledge_chunks': {
+                fields: [
+                    { key: 'layer', label: '层级 (layer)', values: ['community_knowledge', 'technical_methods', 'basic_concepts'] },
+                    { key: 'category', label: '分类 (category)', values: ['forum_post', 'general', 'data_fields'] },
+                    { key: 'type', label: '类型 (type)', values: [] }
+                ]
+            },
+            'alpha_submitted': {
+                fields: [
+                    { key: 'has_rank', label: '包含 rank()', values: ['true', 'false'] },
+                    { key: 'has_ts_rank', label: '包含 ts_rank()', values: ['true', 'false'] },
+                    { key: 'has_group_rank', label: '包含 group_rank()', values: ['true', 'false'] },
+                    { key: 'has_divide_cap', label: '市值标准化', values: ['true', 'false'] },
+                    { key: 'has_group_neutralize', label: '行业中性化', values: ['true', 'false'] }
+                ]
+            },
+            'alpha_submittable': {
+                fields: [
+                    { key: 'has_rank', label: '包含 rank()', values: ['true', 'false'] },
+                    { key: 'has_ts_rank', label: '包含 ts_rank()', values: ['true', 'false'] },
+                    { key: 'has_group_rank', label: '包含 group_rank()', values: ['true', 'false'] },
+                    { key: 'has_divide_cap', label: '市值标准化', values: ['true', 'false'] },
+                    { key: 'has_group_neutralize', label: '行业中性化', values: ['true', 'false'] }
+                ]
+            },
+            'alpha_failure': {
+                fields: [
+                    { key: 'fail_type', label: '失败类型', values: ['LOW_FITNESS', 'LOW_SHARPE', 'LOW_SUB_UNIVERSE_SHARPE', 'CONCENTRATED_WEIGHT', 'HIGH_TURNOVER', 'LOW_TURNOVER'] },
+                    { key: 'has_rank', label: '包含 rank()', values: ['true', 'false'] },
+                    { key: 'has_divide_cap', label: '市值标准化', values: ['true', 'false'] }
+                ]
+            }
+        };
+
+        // 默认配置（未知集合）
+        const defaultFilterConfig = {
+            fields: []
+        };
 
         // 页面加载时初始化
         document.addEventListener('DOMContentLoaded', function() {
             loadStats();
+            // 初始化集合信息显示
+            updateCollectionInfo();
+            // 初始化筛选字段
+            updateFilterFields();
+            // 下拉框变化事件
+            document.getElementById('collectionSelect').addEventListener('change', function() {
+                currentCollection = this.value;
+                updateCollectionInfo();
+                updateFilterFields();
+            });
+
+            document.getElementById('filterField').addEventListener('change', onFilterFieldChange);
         });
 
         // 加载统计信息
@@ -875,39 +1000,162 @@
                 const response = await fetch('/api/vector/stats');
                 const data = await response.json();
 
-                document.getElementById('collectionName').textContent = data.collection || '-';
-                document.getElementById('totalCount').textContent = data.count || '-';
+                document.getElementById('totalCount').textContent = data.total_count || '-';
                 document.getElementById('dbPath').textContent = data.path || '-';
                 document.getElementById('modelName').textContent = data.model || '-';
+
+                // 填充集合下拉框
+                const collectionSelect = document.getElementById('collectionSelect');
+                collectionSelect.innerHTML = '<option value="">-- 请选择集合 --</option>';
+
+                // 渲染集合列表
+                const collectionsList = document.getElementById('collectionsList');
+                if (data.collections && data.collections.length > 0) {
+                    allCollections = data.collections;
+
+                    // 填充下拉框
+                    data.collections.forEach(col => {
+                        const option = document.createElement('option');
+                        option.value = col.name;
+                        option.textContent = `${col.name} (${col.count} 条)`;
+                        collectionSelect.appendChild(option);
+                    });
+
+                    // 渲染集合卡片
+                    collectionsList.innerHTML = data.collections.map(col => {
+                        const colorClass = col.name.includes('submitted') ? 'success' :
+                                          col.name.includes('submittable') ? 'primary' :
+                                          col.name.includes('failure') ? 'danger' : 'default';
+                        return `
+                            <div class="collection-card ${colorClass}" onclick="selectCollection('${col.name}')">
+                                <div class="collection-name">${col.name}</div>
+                                <div class="collection-count">${col.count} 条记录</div>
+                            </div>
+                        `;
+                    }).join('');
+                }
             } catch (error) {
                 console.error('获取统计信息失败:', error);
             }
         }
 
+        // 选择集合
+        function selectCollection(collectionName) {
+            currentCollection = collectionName;
+            document.getElementById('collectionSelect').value = collectionName;
+            updateCollectionInfo();
+            updateFilterFields();
+            // 自动浏览该集合
+            browseData();
+        }
+
+        // 更新筛选字段下拉框
+        function updateFilterFields() {
+            const fieldSelect = document.getElementById('filterField');
+            const valueSelect = document.getElementById('filterValue');
+
+            // 清空现有选项
+            fieldSelect.innerHTML = '<option value="">-- 选择筛选字段 --</option>';
+            valueSelect.innerHTML = '<option value="">全部</option>';
+
+            if (!currentCollection) return;
+
+            // 获取集合配置
+            const config = collectionFilterConfig[currentCollection] || defaultFilterConfig;
+
+            // 填充字段下拉框
+            config.fields.forEach(field => {
+                const option = document.createElement('option');
+                option.value = field.key;
+                option.textContent = field.label;
+                option.dataset.values = JSON.stringify(field.values);
+                fieldSelect.appendChild(option);
+            });
+        }
+
+        // 字段变化时更新值下拉框
+        function onFilterFieldChange() {
+            const fieldSelect = document.getElementById('filterField');
+            const valueSelect = document.getElementById('filterValue');
+
+            valueSelect.innerHTML = '<option value="">全部</option>';
+
+            const selectedOption = fieldSelect.options[fieldSelect.selectedIndex];
+            if (selectedOption && selectedOption.dataset.values) {
+                const values = JSON.parse(selectedOption.dataset.values);
+                values.forEach(val => {
+                    const option = document.createElement('option');
+                    option.value = val;
+                    option.textContent = val;
+                    valueSelect.appendChild(option);
+                });
+            }
+        }
+
+        // 更新集合信息显示（所有标签页联动）
+        function updateCollectionInfo() {
+            const infoElements = [
+                'currentCollectionInfo',
+                'filterCollectionInfo',
+                'searchCollectionInfo'
+            ];
+
+            infoElements.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    if (currentCollection) {
+                        const col = allCollections.find(c => c.name === currentCollection);
+                        el.innerHTML = `<span style="color: #065f46;">✓ 当前: <strong>${currentCollection}</strong> (${col ? col.count : 0} 条)</span>`;
+                        el.className = 'collection-info-badge active';
+                    } else {
+                        el.innerHTML = '<span style="color: #92400e;">⚠ 请先选择集合</span>';
+                        el.className = 'collection-info-badge empty';
+                    }
+                }
+            });
+        }
+
         // 切换标签页
-        function switchTab(tabName) {
+        function switchTab(tabName, btn) {
             // 更新按钮状态
-            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
-            event.target.classList.add('active');
+            btn.classList.add('active');
             document.getElementById('tab-' + tabName).classList.add('active');
 
             // 隐藏分页
             document.getElementById('paginationSection').style.display = 'none';
             isSearchMode = false;
+
+            // 更新当前标签页的集合信息
+            updateCollectionInfo();
         }
 
         // 浏览数据
         async function browseData() {
+            if (!currentCollection) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: '请先选择集合',
+                    text: '请点击上方集合卡片或从下拉框选择一个集合'
+                });
+                return;
+            }
+
             const limit = parseInt(document.getElementById('browseLimit').value);
             isSearchMode = false;
 
             showLoading();
 
             try {
-                const response = await fetch(`/api/vector/browse?limit=${limit}`);
+                const response = await fetch(`/api/vector/browse?limit=${limit}&collection=${encodeURIComponent(currentCollection)}`);
                 const data = await response.json();
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
 
                 currentResults = data.results || [];
                 displayResults(currentResults, false);
@@ -918,21 +1166,36 @@
 
         // 条件查询
         async function filterData() {
-            const layer = document.getElementById('filterLayer').value;
-            const category = document.getElementById('filterCategory').value;
+            if (!currentCollection) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: '请先选择集合'
+                });
+                return;
+            }
+
+            const filterField = document.getElementById('filterField').value;
+            const filterValue = document.getElementById('filterValue').value;
             const limit = parseInt(document.getElementById('filterLimit').value);
 
             isSearchMode = false;
-
             showLoading();
 
             try {
-                let url = `/api/vector/filter?limit=${limit}`;
-                if (layer) url += `&layer=${layer}`;
-                if (category) url += `&category=${category}`;
+                let url = `/api/vector/filter?limit=${limit}&collection=${encodeURIComponent(currentCollection)}`;
+
+                // 构建筛选条件
+                if (filterField && filterValue) {
+                    url += `&field=${encodeURIComponent(filterField)}&value=${encodeURIComponent(filterValue)}`;
+                }
 
                 const response = await fetch(url);
                 const data = await response.json();
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
 
                 currentResults = data.results || [];
                 displayResults(currentResults, false);
@@ -943,6 +1206,14 @@
 
         // 语义搜索
         async function semanticSearch() {
+            if (!currentCollection) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: '请先选择集合'
+                });
+                return;
+            }
+
             const query = document.getElementById('searchQuery').value.trim();
             const limit = parseInt(document.getElementById('searchLimit').value);
 
@@ -961,9 +1232,14 @@
                 const response = await fetch('/api/vector/search', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({query, limit})
+                    body: JSON.stringify({query, limit, collection: currentCollection})
                 });
                 const data = await response.json();
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
 
                 currentResults = data.results || [];
                 displayResults(currentResults, true);
