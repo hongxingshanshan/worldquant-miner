@@ -51,6 +51,15 @@ try:
 except ImportError:
     OPTIMIZER_AVAILABLE = False
 
+# 尝试导入本地验证器
+try:
+    from alpha_validator import AlphaValidator
+    VALIDATOR_AVAILABLE = True
+except ImportError as e:
+    VALIDATOR_AVAILABLE = False
+    import logging
+    logging.getLogger(__name__).warning(f"本地验证器导入失败: {e}")
+
 # 导入拆分出的模块
 try:
     from alpha_patterns import (
@@ -138,6 +147,16 @@ class AlphaGenerator:
                 logger.warning(f"智能提示词构建器初始化失败: {e}")
                 import traceback
                 logger.warning(traceback.format_exc())
+
+        # 初始化本地验证器
+        self.validator = None
+        self.validator_min_score = 50  # 验证最低评分阈值
+        if VALIDATOR_AVAILABLE:
+            try:
+                self.validator = AlphaValidator()
+                logger.info("✅ 本地验证器初始化成功")
+            except Exception as e:
+                logger.warning(f"本地验证器初始化失败: {e}")
 
         logger.info(f"OPTIMIZER_AVAILABLE: {OPTIMIZER_AVAILABLE}, llm_client: {self.llm_client is not None}")
 
@@ -407,26 +426,110 @@ class AlphaGenerator:
     def clean_alpha_ideas(self, ideas: List[str]) -> List[str]:
         """Clean and validate alpha ideas, keeping only valid expressions."""
         cleaned_ideas = []
-        
+
         for idea in ideas:
             # Skip if idea is just a number or single word
             if re.match(r'^\d+\.?$|^[a-zA-Z]+$', idea):
                 continue
-            
+
             # Skip if idea is a description (contains common English words)
             common_words = ['it', 'the', 'is', 'are', 'captures', 'provides', 'measures']
             if any(word in idea.lower() for word in common_words):
                 continue
-            
+
             # Verify idea contains valid operators/functions
-            valid_functions = ['ts_mean', 'divide', 'subtract', 'add', 'multiply', 'zscore', 
+            valid_functions = ['ts_mean', 'divide', 'subtract', 'add', 'multiply', 'zscore',
                               'ts_rank', 'ts_std_dev', 'rank', 'log', 'sqrt']
             if not any(func in idea for func in valid_functions):
                 continue
-            
+
             cleaned_ideas.append(idea)  # Just append the expression string
-        
+
         return cleaned_ideas
+
+    def validate_alpha_locally(self, expressions: List[str], min_score: int = None) -> Dict:
+        """
+        本地验证 Alpha 表达式，预测可能失败的原因
+
+        Args:
+            expressions: Alpha 表达式列表
+            min_score: 最低评分阈值（默认使用 self.validator_min_score）
+
+        Returns:
+            验证结果字典，包含:
+            - valid_count: 通过验证的数量
+            - filtered: 通过验证的表达式列表
+            - summary: 验证摘要统计
+            - details: 每个表达式的详细验证结果
+        """
+        if not self.validator:
+            logger.warning("本地验证器未初始化，跳过验证")
+            return {
+                "valid_count": len(expressions),
+                "filtered": expressions,
+                "summary": {"skipped": True},
+                "details": []
+            }
+
+        min_score = min_score or self.validator_min_score
+
+        logger.info(f"开始本地验证 {len(expressions)} 个 Alpha 表达式 (min_score={min_score})")
+
+        # 批量验证
+        results = self.validator.batch_validate(expressions)
+
+        # 筛选通过验证的表达式
+        filtered = []
+        details = []
+
+        for i, result in enumerate(results):
+            expr = expressions[i]
+            details.append({
+                "expression": expr,
+                "valid": result["valid"],
+                "score": result["score"],
+                "has_outer_rank": result["has_outer_rank"],
+                "has_cap_norm": result["has_cap_norm"],
+                "has_neutralization": result["has_neutralization"],
+                "warnings": result["warnings"],
+                "errors": result["errors"],
+                "predicted_failures": result["predicted_failures"]
+            })
+
+            if result["valid"] and result["score"] >= min_score:
+                filtered.append(expr)
+            else:
+                # 记录被过滤的原因
+                reasons = []
+                if not result["valid"]:
+                    reasons.extend(result["errors"])
+                if result["score"] < min_score:
+                    reasons.append(f"评分过低 ({result['score']} < {min_score})")
+                if result["predicted_failures"]:
+                    reasons.append(f"预测失败: {result['predicted_failures']}")
+
+                logger.info(f"  ❌ 过滤: {expr[:50]}... | 原因: {reasons}")
+
+        # 获取摘要统计
+        summary = self.validator.get_validation_summary(expressions)
+
+        logger.info(f"验证完成: 通过 {len(filtered)}/{len(expressions)} 个")
+        logger.info(f"  - 有外层排名: {summary['has_outer_rank']}/{summary['total']}")
+        logger.info(f"  - 有市值标准化: {summary['has_cap_norm']}/{summary['total']}")
+        logger.info(f"  - 有中性化: {summary['has_neutralization']}/{summary['total']}")
+        logger.info(f"  - 平均评分: {summary['avg_score']:.1f}")
+
+        if summary['predicted_failures']:
+            logger.info(f"  - 预测失败类型分布:")
+            for fail_type, count in summary['predicted_failures'].items():
+                logger.info(f"    {fail_type}: {count}")
+
+        return {
+            "valid_count": len(filtered),
+            "filtered": filtered,
+            "summary": summary,
+            "details": details
+        }
 
     def generate_alpha_ideas_with_ollama(self, data_fields: List[Dict], operators: List[Dict]) -> List[str]:
         """Generate alpha ideas using LLM (Ollama or online model) with intelligent prompt builder."""
@@ -1799,13 +1902,26 @@ def main():
                 alpha_ideas = generator.generate_alpha_ideas_with_ollama(data_fields, operators)
                 logger.info(f"生成完成，获得 {len(alpha_ideas)} 个 Alpha 想法")
 
+                # 1.5 本地验证（预筛选）
+                if generator.validator and alpha_ideas:
+                    logger.info("步骤 1.5: 本地验证预筛选...")
+                    validation_result = generator.validate_alpha_locally(alpha_ideas)
+                    alpha_ideas = validation_result["filtered"]
+                    logger.info(f"验证后保留 {len(alpha_ideas)} 个高质量 Alpha")
+
+                    # 记录验证统计
+                    if validation_result["summary"].get("predicted_failures"):
+                        logger.info(f"预测失败类型: {validation_result['summary']['predicted_failures']}")
+
                 # 添加到队列（消费者线程会自动处理）
-                if generator.alpha_queue:
+                if generator.alpha_queue and alpha_ideas:
                     for alpha in alpha_ideas:
                         generator.alpha_queue.add_generated(alpha)
                     queue_size = len(generator.alpha_queue)
                     logger.info(f"📦 Alpha 已加入队列，当前队列大小: {queue_size}")
-                else:
+                elif not alpha_ideas:
+                    logger.warning("⚠️ 本地验证后无有效 Alpha，跳过本轮")
+                elif not generator.alpha_queue:
                     logger.warning("⚠️ alpha_queue 未初始化，Alpha 未加入队列")
 
                 # 2. 优化失败的 Alpha（生产者）
