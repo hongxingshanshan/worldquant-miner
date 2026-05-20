@@ -105,7 +105,7 @@ class MySQLConnector:
             'database': config.get('database', 'worldquant_alpha'),
             'charset': config.get('charset', 'utf8mb4'),
             'cursorclass': DictCursor,
-            'autocommit': False
+            'autocommit': True 
         }
         self._connected = False
 
