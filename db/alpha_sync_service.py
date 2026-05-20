@@ -55,8 +55,12 @@ class AlphaSyncService:
         # 创建数据库
         self.db.create_database_if_not_exists()
 
-        # 读取建表 SQL
-        sql_file = os.path.join(os.path.dirname(__file__), 'migrations', '001_init.sql')
+        # 优先使用无外键版本的 SQL
+        sql_file = os.path.join(os.path.dirname(__file__), 'migrations', '004_init_no_foreign_keys.sql')
+        if not os.path.exists(sql_file):
+            # 回退到原始版本
+            sql_file = os.path.join(os.path.dirname(__file__), 'migrations', '001_init.sql')
+
         if os.path.exists(sql_file):
             with open(sql_file, 'r', encoding='utf-8') as f:
                 sql_content = f.read()
@@ -86,7 +90,7 @@ class AlphaSyncService:
                     if 'already exists' not in err_msg and 'duplicate key name' not in err_msg:
                         logger.warning(f"执行 SQL 失败: {e}")
 
-            logger.info("数据库表初始化完成")
+            logger.info("数据库表初始化完成（无外键版本）")
         else:
             logger.warning(f"SQL 文件不存在: {sql_file}")
 
@@ -675,3 +679,38 @@ class AlphaSyncService:
             LIMIT %s
         """
         return self.db.query_all(sql, (stage, limit))
+
+    def delete_alpha(self, alpha_id: str) -> bool:
+        """
+        删除 Alpha 及所有关联数据
+
+        移除外键约束后，需要显式删除所有关联表数据。
+        此方法在一个事务中完成所有删除操作，保证数据一致性。
+
+        Args:
+            alpha_id: Alpha ID
+
+        Returns:
+            是否删除成功
+        """
+        try:
+            deleted_rows = self.db.delete_alpha_cascade(alpha_id)
+            logger.info(f"已删除 Alpha {alpha_id}，共 {deleted_rows} 条记录")
+            return True
+        except Exception as e:
+            logger.error(f"删除 Alpha {alpha_id} 失败: {e}")
+            return False
+
+    def delete_alphas_batch(self, alpha_ids: List[str]) -> Dict:
+        """
+        批量删除多个 Alpha 及其关联数据
+
+        Args:
+            alpha_ids: Alpha ID 列表
+
+        Returns:
+            删除结果统计
+        """
+        result = self.db.delete_alphas_batch(alpha_ids)
+        logger.info(f"批量删除完成: 成功 {result['success']}, 失败 {result['failed']}")
+        return result

@@ -323,3 +323,75 @@ class MySQLConnector:
         except Exception as e:
             logger.error(f"数据库连接失败: {e}")
             return False
+
+    def delete_alpha_cascade(self, alpha_id: str) -> int:
+        """
+        级联删除 Alpha 及所有关联数据
+
+        移除外键约束后，需要显式删除所有关联表数据。
+        此方法在一个事务中完成所有删除操作，保证数据一致性。
+
+        Args:
+            alpha_id: Alpha ID
+
+        Returns:
+            删除的总行数
+        """
+        total_deleted = 0
+
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                # 按依赖关系顺序删除（先子表后主表）
+                delete_order = [
+                    ("alpha_optimization_history", "alpha_id = %s"),
+                    ("alpha_classifications", "alpha_id = %s"),
+                    ("alpha_team", "alpha_id = %s"),
+                    ("alpha_competitions", "alpha_id = %s"),
+                    ("alpha_checks", "alpha_id = %s"),
+                    ("alpha_performance", "alpha_id = %s"),
+                    ("alpha_settings", "alpha_id = %s"),
+                    ("alpha", "id = %s"),
+                ]
+
+                for table, where in delete_order:
+                    cursor.execute(f"DELETE FROM {table} WHERE {where}", (alpha_id,))
+                    total_deleted += cursor.rowcount
+
+                conn.commit()
+                logger.info(f"已删除 Alpha {alpha_id} 及关联数据，共 {total_deleted} 条记录")
+                return total_deleted
+
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"删除 Alpha {alpha_id} 失败: {e}")
+                raise
+
+    def delete_alphas_batch(self, alpha_ids: list) -> dict:
+        """
+        批量删除多个 Alpha 及其关联数据
+
+        Args:
+            alpha_ids: Alpha ID 列表
+
+        Returns:
+            删除结果统计 {'total': int, 'success': int, 'failed': int, 'deleted_rows': int}
+        """
+        results = {
+            'total': len(alpha_ids),
+            'success': 0,
+            'failed': 0,
+            'deleted_rows': 0
+        }
+
+        for alpha_id in alpha_ids:
+            try:
+                deleted = self.delete_alpha_cascade(alpha_id)
+                results['success'] += 1
+                results['deleted_rows'] += deleted
+            except Exception as e:
+                results['failed'] += 1
+                logger.error(f"批量删除 Alpha {alpha_id} 失败: {e}")
+
+        logger.info(f"批量删除完成: 成功 {results['success']}, 失败 {results['failed']}")
+        return results
