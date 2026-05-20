@@ -1140,10 +1140,10 @@ class AlphaDashboard:
                     "is_submittable": (a['is_checks_fail'] or 0) == 0 and a['status'] == 'UNSUBMITTED' if a['status'] else False
                 })
 
-            return {"data": result, "pagination": pagination}
+            return {"data": result, "pagination": {"page": 1, "page_size": limit, "total": len(result), "total_pages": 1}}
         except Exception as e:
             logger.error(f"从数据库获取 Alpha 列表失败: {e}")
-            return {"data": [], "pagination": {"page": page, "page_size": page_size, "total": 0, "total_pages": 0}}
+            return {"data": [], "pagination": {"page": 1, "page_size": limit, "total": 0, "total_pages": 0}}
 
     def get_alphas_from_db_paginated(self, page: int = 1, page_size: int = 20,
                                       order_by: str = 'is_checks_pass',
